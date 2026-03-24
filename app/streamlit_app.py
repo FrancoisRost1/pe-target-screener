@@ -102,7 +102,7 @@ def debt_capacity_color(val):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
-def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict]:
+def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
     st.sidebar.title("⚙️ Screener Controls")
 
     # Data source
@@ -147,8 +147,27 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict]:
     if total > 0:
         custom_weights = {k: v / total for k, v in custom_weights.items()}
 
+    # LBO assumptions
+    st.sidebar.header("3. LBO Assumptions")
+    st.sidebar.caption("Override model parameters — affects IRR estimates")
+    lbo_defaults = cfg.get("lbo", {})
+    lbo_overrides = {
+        "exit_multiple": st.sidebar.slider(
+            "Entry → Exit Multiple (x)", 6.0, 16.0,
+            float(lbo_defaults.get("exit_multiple", 12.0)), step=0.5,
+        ),
+        "holding_period": st.sidebar.slider(
+            "Holding Period (years)", 3, 7,
+            int(lbo_defaults.get("holding_period", 5)),
+        ),
+        "target_leverage": st.sidebar.slider(
+            "Target Leverage (x EBITDA)", 2.0, 6.0,
+            float(lbo_defaults.get("target_leverage", 4.0)), step=0.25,
+        ),
+    }
+
     # Filters
-    st.sidebar.header("3. Filters")
+    st.sidebar.header("4. Filters")
     filters = {
         "min_score": st.sidebar.slider("Min Adjusted Score", 0, 100, 0),
         "debt_capacity": st.sidebar.multiselect(
@@ -158,7 +177,7 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict]:
         "top_n": st.sidebar.slider("Top N to display", 5, 50, 20),
     }
 
-    return df_raw, custom_weights, filters
+    return df_raw, custom_weights, lbo_overrides, filters
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -169,14 +188,14 @@ def main():
     st.title("📊 Private Equity Target Screener")
     st.caption("Identify LBO candidates — sector-adjusted scoring, IRR proxy, valuation penalty.")
 
-    df_raw, custom_weights, filters = sidebar(cfg)
+    df_raw, custom_weights, lbo_overrides, filters = sidebar(cfg)
 
     if df_raw is None:
         st.info("👈 Configure your data source in the sidebar to get started.")
         _show_methodology()
         return
 
-    run_cfg = {**cfg, "weights": custom_weights}
+    run_cfg = {**cfg, "weights": custom_weights, "lbo": {**cfg.get("lbo", {}), **lbo_overrides}}
 
     with st.spinner("Running screening pipeline..."):
         try:
@@ -243,8 +262,18 @@ def main():
             lambda v: f"{debt_capacity_color(v)} {v}"
         )
 
-    display_df.columns = [c.replace("_", " ").title() for c in display_df.columns]
+    col_rename = {c: c.replace("_", " ").title() for c in display_df.columns}
+    col_rename["irr_proxy"] = "IRR Est."
+    display_df.rename(columns=col_rename, inplace=True)
     st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+    lbo_cfg = run_cfg.get("lbo", {})
+    st.caption(
+        f"IRR estimates assume {int(lbo_cfg.get('holding_period', 5))}yr hold, "
+        f"{lbo_cfg.get('exit_multiple', 12.0):.0f}x exit, "
+        f"{lbo_cfg.get('target_leverage', 4.0):.1f}x entry leverage. "
+        "Simplified model — for indicative purposes only."
+    )
 
     csv = df_top.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download Top Targets CSV", csv, "top_targets.csv", "text/csv")
@@ -357,6 +386,50 @@ def main():
 
         fig3.update_layout(height=500, margin=dict(t=30, b=30))
         st.plotly_chart(fig3, use_container_width=True)
+
+    # ── Top Opportunities ─────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("🎯 Top Opportunities")
+    opp_left, opp_right = st.columns(2)
+
+    with opp_left:
+        st.markdown("**🟢 Best LBO Candidates**")
+        score_75th = df_filtered[score_col].quantile(0.75) if len(df_filtered) else 0
+        best_mask = (
+            (df_filtered["debt_capacity"].isin(["High"]) |
+             (df_filtered.get("quality_score", pd.Series(0, index=df_filtered.index)) > 60)) &
+            (df_filtered[score_col] >= score_75th)
+        )
+        if "irr_proxy" in df_filtered.columns:
+            best_mask &= df_filtered["irr_proxy"].fillna(0) > 0.15
+        best = df_filtered[best_mask].head(3)
+        if best.empty:
+            st.markdown("_No companies match this filter._")
+        else:
+            for _, r in best.iterrows():
+                dc = r.get("debt_capacity", "—")
+                irr = r.get("irr_proxy")
+                irr_str = fmt_irr(irr) if irr is not None and not (isinstance(irr, float) and np.isnan(irr)) else "N/A"
+                name = r.get("company", r.get("ticker", "—"))
+                score_val = r.get(score_col, float("nan"))
+                st.markdown(
+                    f"**#{int(r.get('rank', 0))} — {name}** | "
+                    f"Score: {score_val:.0f} | IRR: {irr_str} | {debt_capacity_color(dc)}"
+                )
+
+    with opp_right:
+        st.markdown("**🔴 Watch List (red flags)**")
+        watch = df_filtered[df_filtered["red_flags"].fillna("") != ""].copy()
+        if not watch.empty:
+            watch["_flag_count"] = watch["red_flags"].str.count(r"\|") + 1
+            watch = watch.sort_values("_flag_count", ascending=False).head(3)
+        if watch.empty:
+            st.markdown("_No companies with red flags in current filter._")
+        else:
+            for _, r in watch.iterrows():
+                name = r.get("company", r.get("ticker", "—"))
+                flags = r.get("red_flags", "")
+                st.markdown(f"**{name}** | ⚠️ {flags}")
 
     # ── Company Drill-Down ────────────────────────────────────────────────────
     st.markdown("---")

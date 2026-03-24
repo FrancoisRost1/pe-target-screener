@@ -246,3 +246,57 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 - Push to GitHub (`git push origin main`)
 
 *Last updated: 2026-03-24 — Session 3*
+
+---
+
+### Session 5 — IRR model fixes, FCF yield on EV, LBO UI, memo quality
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — IRR proxy math corrected:**
+- Exit multiple now `min(entry EV/EBITDA, config cap)` — never exits above entry multiple
+- IRR set to NaN if `equity_required <= 0` OR `exit_equity <= 0` (both conditions)
+- This fixed Cal-Maine Foods IRR showing N/A (entry EV/EBITDA was below exit cap → now correctly uses entry multiple)
+
+**FIX 2 — Equity Required floor enforced:**
+- `max_debt = min(EBITDA × leverage, EV × 70%)` — debt never exceeds 70% of EV
+- `equity_required = max(EV - max_debt, EV × 20%)` — minimum 20% equity floor
+- EV missing/zero/negative → all LBO metrics set to NaN
+- Eliminated phantom $0m equity cheque results
+
+**FIX 3 — Memo quality: no more empty bull/bear:**
+- If `bear` list empty: fallback to valuation comment (>10x), growth comment (<5%), or float comment
+- If `bull` list empty: fallback to "defensive business model with stable cash generation"
+
+**FIX 4 — New ratio: FCF Yield on EV:**
+- `fcf_yield_ev = FCF / EV` — real cash return vs. price paid
+- Added to `ratios.py` + `compute_all_ratios()`
+- Winsorized to [-20%, +50%]
+- Weight in config: 5% (from `ebitda_growth` which moved to 0%)
+
+**FIX 5 — Dashboard: LBO assumptions sidebar (Section 3):**
+- New sliders: Exit Multiple (6x–16x), Holding Period (3–7yr), Target Leverage (2x–6x)
+- Overrides flow into `run_cfg["lbo"]` → pipeline recalculates IRR live
+- Filters section renumbered to Section 4
+
+**FIX 6 — Dashboard: Top Opportunities panel:**
+- 🟢 Best LBO Candidates: debt_capacity=High OR quality_score>60, irr_proxy>15%, top 25% score
+- 🔴 Watch List: companies with red flags sorted by flag count descending
+
+**FIX 7 — Dashboard: IRR column renamed to "IRR Est." + assumptions caption**
+- Caption shows hold period, exit multiple, leverage used — sets expectations clearly
+
+**Top 5 PE Targets (post-fix, 2026-03-24):**
+| Rank | Company | Score | IRR Est. | Equity Required | Debt Capacity |
+|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | 91.5 | ~46% | $762m | Medium |
+| 2 | Stride Inc | 81.3 | ~30% | $1,717m | High |
+| 3 | ExlService Holdings | 70.8 | ~20% | $3,240m | Medium |
+| 4 | Graco Inc | 68.6 | ~-1% | $10,507m | High |
+| 5 | Cognizant Technology | 66.4 | ~18% | $12,619m | Medium |
+
+**Validation:** All top 10 companies have valid equity_required (>$1m) and non-NaN IRR proxy ✅
+
+**Files changed:** `screener/lbo.py`, `screener/ratios.py`, `screener/cleaner.py`, `screener/summary.py`, `config.yaml`, `app/streamlit_app.py`
+
+*Last updated: 2026-03-24 — Session 5*

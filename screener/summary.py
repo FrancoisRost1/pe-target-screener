@@ -121,6 +121,18 @@ def generate_memo(row: pd.Series) -> str:
         elif irr < 0.10:
             bear.append(f"IRR proxy ~{irr:.0%} — returns look stretched")
 
+    # ── Fallbacks: never leave bull or bear empty ─────────────────────────────
+    if not bull:
+        bull.append("defensive business model with stable cash generation")
+
+    if not bear:
+        if ev_ebitda is not None and not pd.isna(ev_ebitda) and ev_ebitda > 10:
+            bear.append(f"valuation at {ev_ebitda:.1f}x limits return upside")
+        elif rev_g is not None and not pd.isna(rev_g) and rev_g < 0.05:
+            bear.append("limited organic growth constrains deleveraging pace")
+        else:
+            bear.append("limited public float may complicate exit process")
+
     # ── Key Risk (single most important, priority order) ──────────────────────
     flags_str = row.get("red_flags", "")
     flags_list = [f.strip() for f in flags_str.split(" | ") if f.strip()] if flags_str else []

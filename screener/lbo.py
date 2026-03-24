@@ -2,16 +2,20 @@
 lbo.py — Simplified LBO return estimation
 
 For each company, estimates:
-- Max debt capacity (EBITDA × target leverage)
+- Max debt capacity (capped at 70% of EV, minimum 20% equity)
 - Equity required at entry
 - Approximate exit equity value
 - Simplified IRR proxy
 
+Assumptions (all overridable via config.yaml lbo: section):
+  target_leverage:    4.0x EBITDA (max debt, subject to 70% EV cap)
+  holding_period:     5 years
+  exit_multiple:      min(entry EV/EBITDA, config cap) — never exit above entry
+  debt_repayment_rate: 40% of cumulative FCF reduces debt
+
 PE context: A screener without return estimation is incomplete.
 Even a rough IRR tells you whether a deal can work at current prices.
 The goal isn't precision — it's a quick filter: does the math work at all?
-At 12x entry EV/EBITDA with 4x leverage, can a PE fund realistically
-earn 20%+ IRR? This module answers that question in one pass.
 """
 
 import pandas as pd
@@ -38,32 +42,52 @@ def compute_lbo_metrics(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
-    Estimate max debt a PE fund could raise and equity check at entry.
+    Estimate max debt a PE fund could raise and equity cheque at entry.
 
-    max_debt = EBITDA × target_leverage
-        PE funds typically lever at 4–6x EBITDA. 4x is conservative for
-        a screener default — avoids flagging overleveraged structures.
+    max_debt = min(EBITDA × target_leverage, EV × 0.70)
+        Capped at 70% of EV so the fund always writes at least 30% equity.
+        In practice, lenders won't finance >65–70% of purchase price regardless
+        of EBITDA leverage — this prevents the model from producing $0 equity cheques.
 
     equity_required = EV - max_debt
-        This is what the sponsor must write as an equity cheque.
-        If EV is not available, we skip (NaN).
+        Floored at 20% of EV — sponsor minimum equity is a market convention.
+        Deals below 20% equity are considered too risky by most LPs and lenders.
 
-    PE context: If equity_required is negative (max_debt > EV), the deal
-    is theoretically all-debt. That's unrealistic — we cap at min 1 to
-    avoid division errors downstream.
+    If EV is missing, zero, or negative: all LBO metrics set to NaN.
+
+    PE context: The equity cheque is what the sponsor actually risks.
+    Getting it right is more important than getting a precise IRR.
     """
     lbo = cfg.get("lbo", {})
     target_leverage = lbo.get("target_leverage", 4.0)
 
-    if "ebitda" in df.columns:
-        df["max_debt"] = df["ebitda"].clip(lower=0) * target_leverage
-    else:
-        df["max_debt"] = np.nan
+    ev = df.get("enterprise_value", pd.Series(np.nan, index=df.index))
+    ebitda = df.get("ebitda", pd.Series(np.nan, index=df.index))
 
-    if "enterprise_value" in df.columns and "max_debt" in df.columns:
-        df["equity_required"] = (df["enterprise_value"] - df["max_debt"]).clip(lower=1)
-    else:
+    if "enterprise_value" not in df.columns or "ebitda" not in df.columns:
+        df["max_debt"] = np.nan
         df["equity_required"] = np.nan
+        return df
+
+    # Mask for valid EV (positive, non-NaN)
+    valid_ev = df["enterprise_value"].notna() & (df["enterprise_value"] > 0)
+
+    debt_from_ebitda = df["ebitda"].clip(lower=0) * target_leverage
+    debt_cap_70pct = df["enterprise_value"] * 0.70
+
+    max_debt_raw = debt_from_ebitda.where(
+        debt_from_ebitda < debt_cap_70pct, debt_cap_70pct
+    )
+
+    equity_raw = df["enterprise_value"] - max_debt_raw
+    equity_floor = df["enterprise_value"] * 0.20
+    equity_required = equity_raw.where(equity_raw >= equity_floor, equity_floor)
+
+    # Recalculate max_debt after applying equity floor
+    max_debt_final = df["enterprise_value"] - equity_required
+
+    df["max_debt"] = max_debt_final.where(valid_ev, np.nan)
+    df["equity_required"] = equity_required.where(valid_ev, np.nan)
 
     return df
 
@@ -73,27 +97,33 @@ def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     Simplified IRR proxy over the holding period.
 
     Methodology:
-      exit_ebitda = ebitda × (1 + revenue_growth_clipped)^holding_period
-        Revenue growth is clipped to [−5%, +15%] — extreme growth rates
-        don't persist over a 5-year hold and would distort the IRR.
+      exit_ebitda = ebitda × (1 + revenue_growth.clip(-5%, +15%))^holding_period
+        Revenue growth clipped — extreme rates don't persist over a 5yr hold.
+
+      exit_multiple = min(entry EV/EBITDA, config exit_multiple cap)
+        A key discipline: the model NEVER assumes exit above entry multiple.
+        If you buy at 15x, you model 12x exit (config cap). This is the correct
+        conservative assumption for any LBO model.
 
       exit_ev = exit_ebitda × exit_multiple
-        Exit multiple defaults to 12x (conservative) to avoid fantasy returns.
+      debt_repaid = FCF.clip(0) × holding_period × debt_repayment_rate
+      debt_remaining = max(max_debt - debt_repaid, 0)
+      exit_equity = exit_ev - debt_remaining
 
-      debt_repaid = FCF × holding_period × debt_repayment_rate
-        We assume 40% of cumulative FCF goes to debt repayment (rest to fees,
-        capex, and working capital). Simple but directionally correct.
+      irr_proxy = (exit_equity / equity_required)^(1/holding_period) - 1
 
-      exit_equity = exit_ev − max(max_debt − debt_repaid, 0)
-      irr_proxy = (exit_equity / equity_required)^(1/holding_period) − 1
+    Validity gates:
+      - NaN if equity_required <= 0 (deal structure invalid)
+      - NaN if exit_equity <= 0 (sponsor wiped out — not a real return)
+      - Capped at [-50%, +100%] to suppress noise
 
-    PE context: A fund targeting 20%+ IRR needs exit_equity / equity_required
-    of roughly 2.5x over 5 years. This proxy surfaces those opportunities.
-    IRR is capped at [−50%, +100%] to prevent outliers from dominating ranks.
+    PE context: A fund targeting 20%+ IRR needs ~2.5x MOIC over 5 years.
+    The exit multiple discipline is critical: most LBO models blow up because
+    they assume multiple expansion. This model assumes contraction.
     """
     lbo = cfg.get("lbo", {})
     holding_period = lbo.get("holding_period", 5)
-    exit_multiple = lbo.get("exit_multiple", 12.0)
+    exit_multiple_cap = lbo.get("exit_multiple", 12.0)
     debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
 
     required_cols = {"ebitda", "equity_required", "max_debt"}
@@ -102,28 +132,40 @@ def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         df["irr_proxy"] = np.nan
         return df
 
-    growth = df.get("revenue_growth", pd.Series(0.0, index=df.index)).fillna(0.0)
+    # Clipped growth for exit EBITDA projection
+    growth = df["revenue_growth"].fillna(0.0) if "revenue_growth" in df.columns \
+        else pd.Series(0.0, index=df.index)
     growth_clipped = growth.clip(-0.05, 0.15)
-
     exit_ebitda = df["ebitda"].clip(lower=0) * ((1 + growth_clipped) ** holding_period)
+
+    # Exit multiple: never above entry, capped at config max
+    entry_ev_ebitda = df["ev_to_ebitda"].fillna(exit_multiple_cap) \
+        if "ev_to_ebitda" in df.columns else pd.Series(exit_multiple_cap, index=df.index)
+    exit_multiple = entry_ev_ebitda.clip(upper=exit_multiple_cap)
+
     exit_ev = exit_ebitda * exit_multiple
 
-    fcf = df.get("free_cash_flow", pd.Series(np.nan, index=df.index))
-    debt_repaid = (fcf.clip(lower=0) * holding_period * debt_repayment_rate).fillna(0)
+    # Debt repayment from FCF
+    fcf = df["free_cash_flow"].fillna(0.0) if "free_cash_flow" in df.columns \
+        else pd.Series(0.0, index=df.index)
+    debt_repaid = fcf.clip(lower=0) * holding_period * debt_repayment_rate
     debt_remaining = (df["max_debt"] - debt_repaid).clip(lower=0)
 
     exit_equity = exit_ev - debt_remaining
 
-    # Avoid division by zero or negative equity_required
-    eq_req = df["equity_required"].replace(0, np.nan)
-    moic = exit_equity / eq_req
-    moic = moic.clip(lower=0)  # MOIC can't be negative
+    # IRR calculation with validity gates
+    eq_req = df["equity_required"]
+    valid = (
+        eq_req.notna() & (eq_req > 0) &
+        exit_equity.notna() & (exit_equity > 0)
+    )
 
-    irr = moic ** (1.0 / holding_period) - 1
+    irr = pd.Series(np.nan, index=df.index)
+    moic = exit_equity[valid] / eq_req[valid]
+    irr[valid] = moic ** (1.0 / holding_period) - 1
+
     df["irr_proxy"] = irr.clip(-0.5, 1.0)
-
-    # Set to NaN where equity_required was invalid
-    df.loc[df["equity_required"].isna() | (df["equity_required"] <= 1), "irr_proxy"] = np.nan
+    df.loc[~valid, "irr_proxy"] = np.nan
 
     return df
 
@@ -135,8 +177,8 @@ def compute_fcf_yield_on_equity(df: pd.DataFrame) -> pd.DataFrame:
     fcf_yield_equity = FCF / equity_required
 
     PE context: A fund earning 10%+ FCF yield on invested equity in year 1
-    has a de-risked deal — it can service debt, return capital, and still
-    compound. Anything below 5% suggests the entry price is too rich.
+    has a de-risked deal — it can service debt, return capital, and compound.
+    Anything below 5% suggests the entry price is too rich.
     """
     if "free_cash_flow" not in df.columns or "equity_required" not in df.columns:
         df["fcf_yield_equity"] = np.nan

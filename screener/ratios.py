@@ -34,6 +34,7 @@ def compute_all_ratios(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     df = compute_revenue_growth(df)
     df = compute_ebitda_growth(df)
     df = compute_capex_to_revenue(df)
+    df = compute_fcf_yield_on_ev(df)
 
     logger.info("All ratios computed")
     return df
@@ -165,6 +166,19 @@ def compute_capex_to_revenue(df: pd.DataFrame) -> pd.DataFrame:
     PE prefers asset-light models where FCF flows to debt service.
     """
     df["capex_to_revenue"] = _safe_divide(df.get("capex"), df.get("revenue"))
+    return df
+
+
+def compute_fcf_yield_on_ev(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    FCF Yield on EV = Free Cash Flow / Enterprise Value
+
+    PE context: Direct cash return relative to price paid. Complements EV/EBITDA
+    with a real cash perspective — EBITDA can be manipulated, FCF cannot.
+    Above 6% is attractive for LBO; below 3% suggests an expensive deal.
+    Higher = better.
+    """
+    df["fcf_yield_ev"] = _safe_divide(df.get("free_cash_flow"), df.get("enterprise_value"))
     return df
 
 

@@ -121,6 +121,9 @@ def winsorize_ratios(df: pd.DataFrame) -> pd.DataFrame:
     if "roic" in df.columns:
         df["roic"] = df["roic"].clip(-0.5, 1.0)
 
+    if "fcf_yield_ev" in df.columns:
+        df["fcf_yield_ev"] = df["fcf_yield_ev"].clip(-0.2, 0.5)
+
     logger.info("Winsorization applied to ratio columns")
     return df
 

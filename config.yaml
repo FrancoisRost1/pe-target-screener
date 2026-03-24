@@ -13,8 +13,9 @@ weights:
   net_debt_to_ebitda: 0.10  # Leverage headroom (lower = better)
   interest_coverage: 0.10   # Debt service capacity
   revenue_growth: 0.10      # Growth trajectory
-  ebitda_growth: 0.05       # Earnings momentum
+  ebitda_growth: 0.00       # Earnings momentum (weight moved to fcf_yield_ev)
   ev_to_ebitda: 0.15        # Entry valuation attractiveness (lower = better)
+  fcf_yield_ev: 0.05        # FCF yield on EV — real cash return vs price paid
 
 # -------------------------------------------------------------------
 # Metrics where LOWER value = BETTER (ranking will be inverted)
