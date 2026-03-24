@@ -115,67 +115,78 @@ def compute_valuation_penalty(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 def apply_deal_killer_penalty(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Apply penalties for deals that are fundamentally broken from an IRR standpoint.
+    Apply multiplicative score penalties for deals with broken LBO math.
 
-    PE context: A negative IRR proxy means the model can't generate equity returns
-    under standard LBO assumptions — the deal simply doesn't work at this price/leverage.
-    These companies should be strongly penalized regardless of quality metrics, as no
-    amount of operational improvement rescues a deal with broken entry math.
+    PE context: An additive penalty (-20pts) is insufficient when a company
+    has a 90+ raw score — it can still rank near the top despite a negative IRR.
+    Multiplying the score (or zeroing it) ensures broken deals fall below all
+    viable candidates, regardless of their quality metrics.
 
-    Penalties (cumulative):
-      irr_proxy < 0      → -20 pts (deal doesn't pencil)
-      irr_proxy < -0.20  → -35 pts instead (severely broken — replaces -20)
-      equity_required > EV * 90% → -10 pts (almost no leverage — buyout loses its purpose)
+    Logic (applied to pe_score_adjusted, which must already exist):
+      irr_proxy < 0 but >= -15%  → halve pe_score_adjusted (×0.5)
+      irr_proxy < -15%           → set pe_score_adjusted = 0 (deal is dead)
+      equity_required > EV × 90% → additional -10pts (almost no leverage)
 
-    Also appends flag labels to red_flags for transparency in the drill-down.
+    Also appends "Negative IRR" to red_flags for drill-down transparency.
+    Records effective penalty in deal_killer_penalty column for display.
     """
     df = df.copy()
-    penalty = pd.Series(0.0, index=df.index)
 
-    has_irr = "irr_proxy" in df.columns
-    has_eq = "equity_required" in df.columns
-    has_ev = "enterprise_value" in df.columns
+    if "pe_score_adjusted" not in df.columns:
+        df["deal_killer_penalty"] = 0.0
+        return df
 
-    if has_irr:
-        irr = df["irr_proxy"]
-        # Severely negative IRR: -35 pts (dominant tier)
-        penalty = np.where(irr.lt(-0.20).fillna(False), -35,
-                  np.where(irr.lt(0).fillna(False), -20, 0))
-        penalty = pd.Series(penalty, index=df.index, dtype=float)
+    original_adj = df["pe_score_adjusted"].copy()
 
-    if has_eq and has_ev:
-        eq = df["equity_required"].fillna(np.nan)
-        ev = df["enterprise_value"].fillna(np.nan)
-        bloated_equity = (eq > ev * 0.90).fillna(False)
-        penalty += np.where(bloated_equity, -10, 0)
-
-    df["deal_killer_penalty"] = penalty
-
-    # Append labels to red_flags for transparency
     if "red_flags" not in df.columns:
         df["red_flags"] = ""
 
-    if has_irr:
+    if "irr_proxy" in df.columns:
         irr = df["irr_proxy"]
-        df.loc[irr.lt(-0.20).fillna(False), "red_flags"] = (
-            df.loc[irr.lt(-0.20).fillna(False), "red_flags"]
-            .apply(lambda s: (s + " | Negative IRR").lstrip(" | "))
-        )
-        mildly_neg = irr.lt(0).fillna(False) & ~irr.lt(-0.20).fillna(False)
-        df.loc[mildly_neg, "red_flags"] = (
-            df.loc[mildly_neg, "red_flags"]
-            .apply(lambda s: (s + " | Negative IRR").lstrip(" | "))
+        neg_irr_severe = irr.notna() & (irr < -0.15)
+        neg_irr_mild = irr.notna() & (irr < 0) & ~neg_irr_severe
+
+        # Halve score for mildly negative IRR
+        df.loc[neg_irr_mild, "pe_score_adjusted"] = (
+            df.loc[neg_irr_mild, "pe_score_adjusted"] * 0.5
+        ).round(2)
+
+        # Zero out for severely negative IRR
+        df.loc[neg_irr_severe, "pe_score_adjusted"] = 0.0
+
+        # Append flag (avoid duplicating if already present)
+        flagged = neg_irr_mild | neg_irr_severe
+        df.loc[flagged, "red_flags"] = df.loc[flagged].apply(
+            lambda r: _append_flag(r.get("red_flags", ""), "Negative IRR"), axis=1
         )
 
-    if has_eq and has_ev:
-        bloated_equity = (df["equity_required"].fillna(np.nan) > df["enterprise_value"].fillna(np.nan) * 0.90).fillna(False)
-        df.loc[bloated_equity, "red_flags"] = (
-            df.loc[bloated_equity, "red_flags"]
-            .apply(lambda s: (s + " | Deal math challenged").lstrip(" | "))
+    # Bloated equity: almost no leverage — LBO loses its return engine
+    if "equity_required" in df.columns and "enterprise_value" in df.columns:
+        bloated = (
+            df["equity_required"].fillna(np.nan) > df["enterprise_value"].fillna(np.nan) * 0.90
+        ).fillna(False)
+        df.loc[bloated, "pe_score_adjusted"] = (
+            df.loc[bloated, "pe_score_adjusted"] - 10
+        ).clip(lower=0).round(2)
+        df.loc[bloated, "red_flags"] = df.loc[bloated].apply(
+            lambda r: _append_flag(r.get("red_flags", ""), "Deal math challenged"), axis=1
         )
 
-    logger.info(f"Deal killer penalty: {(penalty != 0).sum()} companies penalized")
+    # Record effective impact for display in drill-down
+    df["deal_killer_penalty"] = (df["pe_score_adjusted"] - original_adj).round(2)
+
+    penalized = (df["deal_killer_penalty"] != 0).sum()
+    logger.info(f"Deal killer penalty: {penalized} companies penalized")
     return df
+
+
+def _append_flag(existing: str, new_flag: str) -> str:
+    """Append a flag label to the pipe-separated red_flags string without duplicating."""
+    if not existing or (isinstance(existing, float) and pd.isna(existing)):
+        return new_flag
+    if new_flag in str(existing):
+        return str(existing)
+    return str(existing) + " | " + new_flag
 
 
 def _classify_debt_capacity(row: pd.Series, cfg: dict) -> str:

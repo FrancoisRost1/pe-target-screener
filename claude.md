@@ -359,3 +359,71 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `screener/classifier.py`, `screener/scoring.py`, `screener/lbo.py`, `app/streamlit_app.py`
 
 *Last updated: 2026-03-24 — Session 6*
+
+---
+
+### Session 7 — Realistic amortization, scenario IRR, deal killer rewrite, table upgrade
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — Realistic annual debt amortization in LBO model:**
+- Replaced lump-sum `debt_repaid = FCF × years × rate` with year-by-year loop
+- Each year: `repay = min(FCF × rate, remaining_debt)` — no "negative debt" possible
+- Extracted `_amortize_debt(max_debt, annual_fcf, rate, years)` helper in `lbo.py`
+- Extracted `_compute_irr_scenario(df, ...)` helper to avoid code duplication across scenarios
+- Impact: ExlService IRR dropped 20.4% → 16.0% (more realistic — carries $1.1B debt at exit)
+
+**FIX 2 — Exit multiple default + scenario awareness:**
+- `config.yaml`: `exit_multiple` changed from 12.0 → 10.0 (more conservative)
+- Added `exit_multiple_min: 8.0` and `exit_multiple_max: 14.0` for documentation
+- Streamlit sidebar default updated from 12x → 10x
+
+**FIX 3 — Deal killer: multiplicative penalty replacing additive:**
+- `apply_deal_killer_penalty()` in `classifier.py` now modifies `pe_score_adjusted` directly:
+  - `irr < 0` but `>= -15%`: multiply pe_score_adjusted × 0.5
+  - `irr < -15%`: set pe_score_adjusted = 0 (deal is dead)
+  - equity > 90% of EV: subtract 10pts (still bloated)
+- Added `_append_flag()` helper to avoid duplicate red_flag entries
+- `apply_score_adjustments()` in `scoring.py` restructured: additive penalties first → pe_score_adjusted set → then deal killer applied to that result
+- 29 companies penalized (was 21 with additive approach)
+
+**FIX 4 — Scenario Analysis: Base / Upside / Downside IRR:**
+- Added `compute_scenario_irr(df, cfg)` to `lbo.py`
+- Base: growth as-is, exit cap = config (10x)
+- Upside: growth +2%, exit cap + 2x (12x)
+- Downside: growth -2%, exit cap - 2x (8x)
+- Each scenario uses full amortization loop via `_compute_irr_scenario()`
+- Stores `irr_base`, `irr_upside`, `irr_downside` — `irr_proxy` unchanged for backwards compat
+- Note: companies with growth already at ±15% clip show identical scenarios (by design)
+
+**FIX 5 — Scenario IRR display in dashboard drill-down:**
+- Added `fmt_irr_delta()` helper: formats ±X% difference vs base
+- Row 2 of drill-down: "IRR Proxy" → "Base IRR" (uses `irr_base`)
+- LBO Deal Breakdown expander enhanced:
+  - 3-scenario metric row with delta arrows (Downside / Base / Upside)
+  - Horizontal bar chart (red/blue/green) with 20% hurdle rate dashed line at 20%
+  - Height: 200px
+
+**FIX 6 — Top Targets table updated:**
+- `irr_proxy` replaced with `irr_base` + `irr_downside` columns
+- Column headers: "IRR (Base)" and "IRR (Down)"
+- Table caption updated to explain both columns
+
+**Top 5 PE Targets (post Session 7, 2026-03-24):**
+| Rank | Company | Sector | Adj. Score | IRR Base | IRR Down | IRR Up | Debt Capacity |
+|---|---|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 91.5 | ~46% | ~46% | ~46% | Medium |
+| 2 | Stride Inc | Specialty | 81.3 | ~30% | ~30% | ~30% | High |
+| 3 | ExlService Holdings | Business Services | 70.8 | ~16% | ~8% | ~22% | Medium |
+| 4 | Cognizant Technology | Technology | 66.4 | ~18% | ~15% | ~21% | Medium |
+| 5 | Civitas Resources | Energy | 65.0 | ~39% | ~39% | ~39% | Medium |
+
+**Validation:**
+- All top 10 have positive IRR base ✅
+- Amortization: debt_remaining NOT always 0 (Stride: $1.3B remaining, Cognizant: $11B remaining) ✅
+- 29 companies penalized by deal killer (vs 21 in Session 6 — stricter logic) ✅
+- Cal-Maine/Stride/Civitas scenario IRR identical: revenue growth already at 15% clip ceiling ✅ (expected)
+
+**Files changed:** `screener/lbo.py`, `screener/classifier.py`, `screener/scoring.py`, `screener/ranking.py`, `config.yaml`, `app/streamlit_app.py`
+
+*Last updated: 2026-03-24 — Session 7*

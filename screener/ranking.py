@@ -14,11 +14,12 @@ DISPLAY_COLS = [
     "ebitda_margin", "roic", "fcf_conversion",
     "net_debt_to_ebitda", "interest_coverage",
     "ev_to_ebitda", "revenue_growth",
-    "irr_proxy", "max_debt", "equity_required", "fcf_yield_equity",
+    "irr_proxy", "irr_base", "irr_upside", "irr_downside",
+    "max_debt", "equity_required", "fcf_yield_equity",
     "debt_capacity", "red_flags",
     "quality_score", "cash_score", "leverage_score", "valuation_score",
     "pe_score", "pe_score_raw", "pe_score_adjusted",
-    "red_flag_penalty", "valuation_penalty",
+    "red_flag_penalty", "valuation_penalty", "deal_killer_penalty",
 ]
 
 

@@ -85,8 +85,10 @@ output:
 lbo:
   target_leverage: 4.0          # EBITDA multiple for max debt capacity
   holding_period: 5             # Years to exit
-  exit_multiple: 12.0           # EV/EBITDA at exit (conservative cap)
-  debt_repayment_rate: 0.4      # Fraction of cumulative FCF applied to debt repayment
+  exit_multiple: 10.0           # EV/EBITDA at exit — base case cap (more conservative)
+  exit_multiple_min: 8.0        # Downside scenario exit cap
+  exit_multiple_max: 14.0       # Upside scenario exit cap
+  debt_repayment_rate: 0.4      # Annual FCF fraction applied to debt amortization
 
 # -------------------------------------------------------------------
 # Data source

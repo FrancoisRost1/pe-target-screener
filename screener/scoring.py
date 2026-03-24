@@ -169,27 +169,35 @@ def apply_score_adjustments(df: pd.DataFrame) -> pd.DataFrame:
     """
     Apply all score penalties to produce pe_score_adjusted.
 
-    pe_score_adjusted = pe_score + red_flag_penalty + valuation_penalty
-                        + deal_killer_penalty, clipped [0, 100]
+    Step 1 — Additive penalties (red flags, expensive valuation):
+      pe_score_adjusted = pe_score + red_flag_penalty + valuation_penalty
+      Clipped to [0, 100].
 
-    PE context: A high raw score is necessary but not sufficient. Companies
-    with dangerous leverage, expensive valuations, or broken LBO math should
-    be penalized before reaching the shortlist. Deal killer penalties are
-    applied last as they represent fundamental deal-breakers (negative IRR,
-    degenerate capital structure) that override quality metrics.
+    Step 2 — Deal killer (multiplicative, applied to the result of Step 1):
+      irr < 0 but >= -15%  → pe_score_adjusted × 0.5
+      irr < -15%           → pe_score_adjusted = 0
+      equity bloated (>90% EV) → -10pts
+
+    PE context: Additive penalties are insufficient for fundamentally broken
+    deals — a company with a 90+ raw score could still rank near the top after
+    a -20pt additive penalty. Multiplicative / zero penalties ensure broken
+    LBO math collapses the score regardless of quality metrics. Think of Step 1
+    as adjusting for imperfection; Step 2 as flagging deal-breakers.
     """
     df = df.copy()
 
-    # Apply deal killer penalties first (also appends to red_flags)
-    df = apply_deal_killer_penalty(df)
-
+    # Step 1: additive penalties — red flags and valuation
     penalty_cols = []
-    for col in ("red_flag_penalty", "valuation_penalty", "deal_killer_penalty"):
+    for col in ("red_flag_penalty", "valuation_penalty"):
         if col in df.columns:
             penalty_cols.append(df[col].fillna(0))
 
     total_penalty = sum(penalty_cols) if penalty_cols else 0
     df["pe_score_adjusted"] = (df["pe_score"] + total_penalty).clip(0, 100).round(2)
+
+    # Step 2: deal killer — modifies pe_score_adjusted in place, adds deal_killer_penalty
+    df = apply_deal_killer_penalty(df)
+
     return df
 
 

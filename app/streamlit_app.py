@@ -76,6 +76,14 @@ def fmt_irr(val):
     return f"~{val:.0%}"
 
 
+def fmt_irr_delta(val, base):
+    """Format IRR delta vs base case as +X% / -X% or None if either is NaN."""
+    if any(v is None or (isinstance(v, float) and np.isnan(v)) for v in [val, base]):
+        return None
+    diff = val - base
+    return f"{diff:+.0%}"
+
+
 def fmt_mult(val):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "—"
@@ -163,7 +171,7 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
     lbo_overrides = {
         "exit_multiple": st.sidebar.slider(
             "Entry → Exit Multiple (x)", 6.0, 16.0,
-            float(lbo_defaults.get("exit_multiple", 12.0)), step=0.5,
+            float(lbo_defaults.get("exit_multiple", 10.0)), step=0.5,
         ),
         "holding_period": st.sidebar.slider(
             "Holding Period (years)", 3, 7,
@@ -252,7 +260,7 @@ def main():
     TABLE_COLS = [
         "rank", "ticker", "company", "sector",
         "ebitda_margin", "fcf_conversion", "net_debt_to_ebitda",
-        "ev_to_ebitda", "irr_proxy", "debt_capacity", "pe_score_adjusted",
+        "ev_to_ebitda", "irr_base", "irr_downside", "debt_capacity", "pe_score_adjusted",
     ]
     display_df = df_top[[c for c in TABLE_COLS if c in df_top.columns]].copy()
 
@@ -262,8 +270,9 @@ def main():
     for col in ["net_debt_to_ebitda", "ev_to_ebitda"]:
         if col in display_df.columns:
             display_df[col] = display_df[col].apply(fmt_mult)
-    if "irr_proxy" in display_df.columns:
-        display_df["irr_proxy"] = display_df["irr_proxy"].apply(fmt_irr)
+    for col in ["irr_base", "irr_downside"]:
+        if col in display_df.columns:
+            display_df[col] = display_df[col].apply(fmt_irr)
     if "pe_score_adjusted" in display_df.columns:
         display_df["pe_score_adjusted"] = display_df["pe_score_adjusted"].apply(fmt_score)
     if "debt_capacity" in display_df.columns:
@@ -272,16 +281,17 @@ def main():
         )
 
     col_rename = {c: c.replace("_", " ").title() for c in display_df.columns}
-    col_rename["irr_proxy"] = "IRR Est."
+    col_rename["irr_base"] = "IRR (Base)"
+    col_rename["irr_downside"] = "IRR (Down)"
     display_df.rename(columns=col_rename, inplace=True)
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
     lbo_cfg = run_cfg.get("lbo", {})
     st.caption(
-        f"IRR estimates assume {int(lbo_cfg.get('holding_period', 5))}yr hold, "
-        f"{lbo_cfg.get('exit_multiple', 12.0):.0f}x exit, "
-        f"{lbo_cfg.get('target_leverage', 4.0):.1f}x entry leverage. "
-        "Simplified model — for indicative purposes only."
+        f"IRR (Base): {int(lbo_cfg.get('holding_period', 5))}yr hold, "
+        f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit cap. "
+        f"IRR (Down): exit cap −2x, growth −2%. "
+        "Annual amortization at 40% FCF. Simplified model — indicative only."
     )
 
     csv = df_top.to_csv(index=False).encode("utf-8")
@@ -511,7 +521,7 @@ def _show_company_detail(row: pd.Series, cfg: dict):
 
         # Row 2: LBO metrics
         m5, m6, m7, m8 = st.columns(4)
-        m5.metric("IRR Proxy", fmt_irr(row.get("irr_proxy")))
+        m5.metric("Base IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
         m6.metric("Max Debt", fmt_millions(row.get("max_debt")))
         m7.metric("Equity Required", fmt_millions(row.get("equity_required")))
         m8.metric("FCF Yield / Equity", fmt_fcf_yield_equity(row.get("fcf_yield_equity")))
@@ -563,8 +573,8 @@ def _show_company_detail(row: pd.Series, cfg: dict):
             with st.expander("🧮 LBO Deal Breakdown"):
                 st.caption(
                     f"Assumptions: {holding_period}yr hold · "
-                    f"{exit_mult:.1f}x exit multiple · "
-                    f"{debt_repayment_rate:.0%} FCF → debt repayment"
+                    f"{exit_mult:.1f}x exit multiple (base) · "
+                    f"{debt_repayment_rate:.0%} FCF → annual debt amortization"
                 )
                 b1, b2, b3 = st.columns(3)
                 b1.metric("Entry EV", fmt_millions(ev_val))
@@ -579,7 +589,64 @@ def _show_company_detail(row: pd.Series, cfg: dict):
                 st.markdown("---")
                 moic_col, irr_col = st.columns(2)
                 moic_col.metric("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "—")
-                irr_col.metric("IRR Proxy", fmt_irr(row.get("irr_proxy")))
+                irr_col.metric("Base IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
+
+                # 3-Scenario IRR view
+                st.markdown("**📊 IRR Scenarios**")
+                irr_base_val = row.get("irr_base", row.get("irr_proxy"))
+                irr_up_val = row.get("irr_upside")
+                irr_dn_val = row.get("irr_downside")
+
+                s1, s2, s3 = st.columns(3)
+                s1.metric(
+                    "⬇️ Downside", fmt_irr(irr_dn_val),
+                    delta=fmt_irr_delta(irr_dn_val, irr_base_val),
+                )
+                s2.metric("📊 Base Case", fmt_irr(irr_base_val))
+                s3.metric(
+                    "⬆️ Upside", fmt_irr(irr_up_val),
+                    delta=fmt_irr_delta(irr_up_val, irr_base_val),
+                )
+
+                # Horizontal IRR bar chart with hurdle rate line
+                scenario_vals = {
+                    "Downside": irr_dn_val,
+                    "Base": irr_base_val,
+                    "Upside": irr_up_val,
+                }
+                valid_scenarios = {k: v for k, v in scenario_vals.items()
+                                   if v is not None and not pd.isna(v)}
+                if valid_scenarios:
+                    bar_colors = {"Downside": "#e74c3c", "Base": "#4C78A8", "Upside": "#2ecc71"}
+                    fig_irr = go.Figure()
+                    for label, irr_val in valid_scenarios.items():
+                        fig_irr.add_trace(go.Bar(
+                            x=[irr_val * 100],
+                            y=[label],
+                            orientation="h",
+                            marker_color=bar_colors.get(label, "#888"),
+                            name=label,
+                            text=[f"{irr_val:.1%}"],
+                            textposition="outside",
+                            showlegend=False,
+                        ))
+                    # PE hurdle rate reference line at 20%
+                    fig_irr.add_vline(
+                        x=20, line_dash="dash", line_color="rgba(200,200,200,0.6)",
+                        annotation_text="20% hurdle",
+                        annotation_position="top right",
+                        annotation_font_size=10,
+                    )
+                    x_range_min = min(min(v * 100 for v in valid_scenarios.values()) - 5, -5)
+                    x_range_max = max(max(v * 100 for v in valid_scenarios.values()) + 10, 30)
+                    fig_irr.update_layout(
+                        height=200,
+                        margin=dict(t=10, b=10, l=80, r=60),
+                        xaxis=dict(title="IRR (%)", range=[x_range_min, x_range_max]),
+                        yaxis=dict(title=""),
+                        bargap=0.3,
+                    )
+                    st.plotly_chart(fig_irr, use_container_width=True)
 
         # Investment memo with proper line breaks
         memo = row.get("investment_memo", "")

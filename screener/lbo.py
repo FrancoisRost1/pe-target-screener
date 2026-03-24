@@ -5,17 +5,19 @@ For each company, estimates:
 - Max debt capacity (capped at 70% of EV, minimum 20% equity)
 - Equity required at entry
 - Approximate exit equity value
-- Simplified IRR proxy
+- IRR proxy under Base / Upside / Downside scenarios
 
 Assumptions (all overridable via config.yaml lbo: section):
-  target_leverage:    4.0x EBITDA (max debt, subject to 70% EV cap)
-  holding_period:     5 years
-  exit_multiple:      min(entry EV/EBITDA, config cap) — never exit above entry
-  debt_repayment_rate: 40% of cumulative FCF reduces debt
+  target_leverage:     4.0x EBITDA (max debt, subject to 70% EV cap)
+  holding_period:      5 years
+  exit_multiple:       min(entry EV/EBITDA, config cap) — never exit above entry
+  debt_repayment_rate: 40% of annual FCF reduces debt each year
 
 PE context: A screener without return estimation is incomplete.
 Even a rough IRR tells you whether a deal can work at current prices.
 The goal isn't precision — it's a quick filter: does the math work at all?
+Showing Base / Upside / Downside forces the analyst to think about the range
+of outcomes, not just the single-point estimate.
 """
 
 import pandas as pd
@@ -28,13 +30,15 @@ logger = logging.getLogger(__name__)
 def compute_lbo_metrics(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     Main entry point. Runs all LBO estimation functions in sequence.
-    Adds columns: max_debt, equity_required, irr_proxy, fcf_yield_equity.
+    Adds columns: max_debt, equity_required, irr_proxy, irr_base,
+                  irr_upside, irr_downside, fcf_yield_equity.
 
     PE context: Called after winsorization so input metrics are already cleaned.
     """
     df = df.copy()
     df = compute_max_debt(df, cfg)
     df = compute_lbo_irr_proxy(df, cfg)
+    df = compute_scenario_irr(df, cfg)
     df = compute_fcf_yield_on_equity(df)
     logger.info("LBO metrics computed")
     return df
@@ -60,9 +64,6 @@ def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     lbo = cfg.get("lbo", {})
     target_leverage = lbo.get("target_leverage", 4.0)
-
-    ev = df.get("enterprise_value", pd.Series(np.nan, index=df.index))
-    ebitda = df.get("ebitda", pd.Series(np.nan, index=df.index))
 
     if "enterprise_value" not in df.columns or "ebitda" not in df.columns:
         df["max_debt"] = np.nan
@@ -92,68 +93,64 @@ def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df
 
 
-def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+def _amortize_debt(max_debt: pd.Series, annual_fcf: pd.Series,
+                   debt_repayment_rate: float, holding_period: int) -> pd.Series:
     """
-    Simplified IRR proxy over the holding period.
+    Simulate realistic annual debt amortization over the holding period.
 
-    Methodology:
-      exit_ebitda = ebitda × (1 + revenue_growth.clip(-5%, +15%))^holding_period
-        Revenue growth clipped — extreme rates don't persist over a 5yr hold.
+    Each year: repay min(FCF × repayment_rate, remaining_debt).
+    Once debt hits zero, no further repayment (no negative debt).
 
-      exit_multiple = min(entry EV/EBITDA, config exit_multiple cap)
-        A key discipline: the model NEVER assumes exit above entry multiple.
-        If you buy at 15x, you model 12x exit (config cap). This is the correct
-        conservative assumption for any LBO model.
+    PE context: A bullet repayment assumption overstates paydown for low-FCF
+    companies and understates it for strong cash generators. Annual amortization
+    captures the compounding effect of debt reduction: as debt falls, interest
+    expense drops, FCF improves — the virtuous LBO flywheel.
 
-      exit_ev = exit_ebitda × exit_multiple
-      debt_repaid = FCF.clip(0) × holding_period × debt_repayment_rate
-      debt_remaining = max(max_debt - debt_repaid, 0)
-      exit_equity = exit_ev - debt_remaining
-
-      irr_proxy = (exit_equity / equity_required)^(1/holding_period) - 1
-
-    Validity gates:
-      - NaN if equity_required <= 0 (deal structure invalid)
-      - NaN if exit_equity <= 0 (sponsor wiped out — not a real return)
-      - Capped at [-50%, +100%] to suppress noise
-
-    PE context: A fund targeting 20%+ IRR needs ~2.5x MOIC over 5 years.
-    The exit multiple discipline is critical: most LBO models blow up because
-    they assume multiple expansion. This model assumes contraction.
+    Returns: debt_remaining at exit (scalar series, one value per company).
     """
-    lbo = cfg.get("lbo", {})
-    holding_period = lbo.get("holding_period", 5)
-    exit_multiple_cap = lbo.get("exit_multiple", 12.0)
-    debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
+    debt = max_debt.copy().fillna(0.0)
+    fcf_clipped = annual_fcf.clip(lower=0)
 
-    required_cols = {"ebitda", "equity_required", "max_debt"}
-    if not required_cols.issubset(df.columns):
-        logger.warning("Missing columns for IRR proxy — skipping")
-        df["irr_proxy"] = np.nan
-        return df
+    for _ in range(holding_period):
+        annual_repayment = (fcf_clipped * debt_repayment_rate).clip(upper=debt)
+        debt = (debt - annual_repayment).clip(lower=0)
 
-    # Clipped growth for exit EBITDA projection
+    return debt
+
+
+def _compute_irr_scenario(df: pd.DataFrame, holding_period: int,
+                           exit_multiple_cap: float, debt_repayment_rate: float,
+                           growth_delta: float = 0.0) -> pd.Series:
+    """
+    Compute IRR proxy for one scenario given growth and exit multiple assumptions.
+
+    growth_delta: added to revenue_growth before clipping to [-5%, +15%]
+    exit_multiple_cap: the maximum exit EV/EBITDA for this scenario
+
+    Returns a Series of IRR values, NaN where deal structure is invalid.
+    """
     growth = df["revenue_growth"].fillna(0.0) if "revenue_growth" in df.columns \
         else pd.Series(0.0, index=df.index)
-    growth_clipped = growth.clip(-0.05, 0.15)
+    growth_clipped = (growth + growth_delta).clip(-0.05, 0.15)
+
     exit_ebitda = df["ebitda"].clip(lower=0) * ((1 + growth_clipped) ** holding_period)
 
-    # Exit multiple: never above entry, capped at config max
     entry_ev_ebitda = df["ev_to_ebitda"].fillna(exit_multiple_cap) \
-        if "ev_to_ebitda" in df.columns else pd.Series(exit_multiple_cap, index=df.index)
-    exit_multiple = entry_ev_ebitda.clip(upper=exit_multiple_cap)
+        if "ev_to_ebitda" in df.columns \
+        else pd.Series(exit_multiple_cap, index=df.index)
+    exit_mult = entry_ev_ebitda.clip(upper=exit_multiple_cap)
 
-    exit_ev = exit_ebitda * exit_multiple
+    exit_ev = exit_ebitda * exit_mult
 
-    # Debt repayment from FCF
-    fcf = df["free_cash_flow"].fillna(0.0) if "free_cash_flow" in df.columns \
+    annual_fcf = df["free_cash_flow"].fillna(0.0) if "free_cash_flow" in df.columns \
         else pd.Series(0.0, index=df.index)
-    debt_repaid = fcf.clip(lower=0) * holding_period * debt_repayment_rate
-    debt_remaining = (df["max_debt"] - debt_repaid).clip(lower=0)
+
+    debt_remaining = _amortize_debt(
+        df["max_debt"], annual_fcf, debt_repayment_rate, holding_period
+    )
 
     exit_equity = exit_ev - debt_remaining
 
-    # IRR calculation with validity gates
     eq_req = df["equity_required"]
     valid = (
         eq_req.notna() & (eq_req > 0) &
@@ -164,9 +161,82 @@ def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     moic = exit_equity[valid] / eq_req[valid]
     irr[valid] = moic ** (1.0 / holding_period) - 1
 
-    df["irr_proxy"] = irr.clip(-0.5, 1.0)
-    df.loc[~valid, "irr_proxy"] = np.nan
+    return irr.clip(-0.5, 1.0)
 
+
+def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Compute base-case IRR proxy using realistic annual debt amortization.
+
+    Methodology:
+      exit_ebitda = ebitda × (1 + revenue_growth.clip(-5%, +15%))^holding_period
+
+      exit_multiple = min(entry EV/EBITDA, config exit_multiple cap)
+        Key discipline: the model NEVER exits above entry multiple.
+
+      Debt amortization: each year, repay min(FCF × rate, remaining_debt)
+        More realistic than a lump-sum repayment — prevents over-stating
+        paydown for low-FCF companies.
+
+      exit_equity = exit_ev - debt_remaining
+      irr_proxy = (exit_equity / equity_required)^(1/holding_period) - 1
+
+    Validity gates: NaN if equity_required ≤ 0 or exit_equity ≤ 0.
+    """
+    lbo = cfg.get("lbo", {})
+    holding_period = lbo.get("holding_period", 5)
+    exit_multiple_cap = lbo.get("exit_multiple", 10.0)
+    debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
+
+    required_cols = {"ebitda", "equity_required", "max_debt"}
+    if not required_cols.issubset(df.columns):
+        logger.warning("Missing columns for IRR proxy — skipping")
+        df["irr_proxy"] = np.nan
+        return df
+
+    df["irr_proxy"] = _compute_irr_scenario(
+        df, holding_period, exit_multiple_cap, debt_repayment_rate, growth_delta=0.0
+    )
+    return df
+
+
+def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Compute IRR under 3 scenarios for each company.
+
+    PE context: No IC approves a deal based on a single IRR number.
+    The downside case is what kills deals. The upside case is what
+    gets them approved. Showing the range = showing PE thinking.
+
+    Base:     revenue_growth as-is,    exit_multiple = config default
+    Upside:   revenue_growth + 2%,     exit_multiple cap + 2x
+    Downside: revenue_growth - 2%,     exit_multiple cap - 2x
+
+    irr_base mirrors irr_proxy (same assumptions) for consistency.
+    """
+    lbo = cfg.get("lbo", {})
+    holding_period = lbo.get("holding_period", 5)
+    exit_multiple_cap = lbo.get("exit_multiple", 10.0)
+    debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
+
+    required_cols = {"ebitda", "equity_required", "max_debt"}
+    if not required_cols.issubset(df.columns):
+        df["irr_base"] = np.nan
+        df["irr_upside"] = np.nan
+        df["irr_downside"] = np.nan
+        return df
+
+    df["irr_base"] = _compute_irr_scenario(
+        df, holding_period, exit_multiple_cap, debt_repayment_rate, growth_delta=0.0
+    )
+    df["irr_upside"] = _compute_irr_scenario(
+        df, holding_period, exit_multiple_cap + 2.0, debt_repayment_rate, growth_delta=0.02
+    )
+    df["irr_downside"] = _compute_irr_scenario(
+        df, holding_period, max(exit_multiple_cap - 2.0, 4.0), debt_repayment_rate, growth_delta=-0.02
+    )
+
+    logger.info("Scenario IRR computed (base / upside / downside)")
     return df
 
 
@@ -179,6 +249,8 @@ def compute_fcf_yield_on_equity(df: pd.DataFrame) -> pd.DataFrame:
     PE context: A fund earning 10%+ FCF yield on invested equity in year 1
     has a de-risked deal — it can service debt, return capital, and compound.
     Anything below 5% suggests the entry price is too rich.
+
+    Capped at 50% — values above this are data artifacts, not signal.
     """
     if "free_cash_flow" not in df.columns or "equity_required" not in df.columns:
         df["fcf_yield_equity"] = np.nan
