@@ -143,6 +143,10 @@ No code change needed to adjust the model.
 
 ---
 
+## Screenshots
+
+![PE Target Screener Dashboard](assets/dashboard_screenshot.png)
+
 ## Stack
 
 - Python 3.10+
