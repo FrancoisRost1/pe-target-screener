@@ -95,6 +95,15 @@ def fmt_millions(val):
     return f"${val / 1_000_000:.0f}m"
 
 
+def fmt_fcf_yield_equity(val):
+    """Format FCF yield on equity — cap display at >50% to flag outliers."""
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return "—"
+    if val >= 0.50:
+        return ">50%"
+    return f"{val:.1%}"
+
+
 def debt_capacity_color(val):
     colors = {"High": "🟢", "Medium": "🟡", "Low": "🔴"}
     return colors.get(val, "⚪")
@@ -342,15 +351,56 @@ def main():
         x_mid = quad_df["ev_to_ebitda"].median()
         y_mid = quad_df["quality_score"].median()
 
-        fig3.add_hline(y=y_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
-        fig3.add_vline(x=x_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
-
-        # Quadrant labels
         x_min = quad_df["ev_to_ebitda"].min()
         x_max = quad_df["ev_to_ebitda"].max()
         y_min = quad_df["quality_score"].min()
         y_max = quad_df["quality_score"].max()
 
+        # Add 10% padding so zones extend beyond data points
+        x_pad = (x_max - x_min) * 0.10
+        y_pad = (y_max - y_min) * 0.10
+
+        # Colored background zones: Sweet Spot (green), Value Trap + Quality Premium (yellow), Avoid (red)
+        zone_shapes = [
+            # 🎯 Sweet Spot — low valuation, high quality (bottom-left x, top-right y)
+            dict(
+                type="rect", xref="x", yref="y",
+                x0=x_min - x_pad, x1=x_mid,
+                y0=y_mid, y1=y_max + y_pad,
+                fillcolor="rgba(46, 204, 113, 0.08)",
+                line_width=0, layer="below",
+            ),
+            # 💰 Quality Premium — high valuation, high quality
+            dict(
+                type="rect", xref="x", yref="y",
+                x0=x_mid, x1=x_max + x_pad,
+                y0=y_mid, y1=y_max + y_pad,
+                fillcolor="rgba(243, 156, 18, 0.08)",
+                line_width=0, layer="below",
+            ),
+            # ⚠️ Value Trap — low valuation, low quality
+            dict(
+                type="rect", xref="x", yref="y",
+                x0=x_min - x_pad, x1=x_mid,
+                y0=y_min - y_pad, y1=y_mid,
+                fillcolor="rgba(243, 156, 18, 0.08)",
+                line_width=0, layer="below",
+            ),
+            # ❌ Avoid — high valuation, low quality
+            dict(
+                type="rect", xref="x", yref="y",
+                x0=x_mid, x1=x_max + x_pad,
+                y0=y_min - y_pad, y1=y_mid,
+                fillcolor="rgba(231, 76, 60, 0.08)",
+                line_width=0, layer="below",
+            ),
+        ]
+        fig3.update_layout(shapes=zone_shapes)
+
+        fig3.add_hline(y=y_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
+        fig3.add_vline(x=x_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
+
+        # Quadrant labels
         quadrant_labels = [
             (x_min, y_max, "🎯 Sweet Spot", "left", "top"),
             (x_max, y_max, "💰 Quality Premium", "right", "top"),
@@ -441,11 +491,11 @@ def main():
 
     if selected:
         row = df_top[df_top[col_key] == selected].iloc[0]
-        _show_company_detail(row)
+        _show_company_detail(row, run_cfg)
 
 
-def _show_company_detail(row: pd.Series):
-    """Render V2 detailed view: two metric rows + LBO row + memo with line breaks."""
+def _show_company_detail(row: pd.Series, cfg: dict):
+    """Render V2 detailed view: two metric rows + LBO breakdown expander + memo."""
     col1, col2 = st.columns([2, 1])
 
     with col1:
@@ -464,7 +514,7 @@ def _show_company_detail(row: pd.Series):
         m5.metric("IRR Proxy", fmt_irr(row.get("irr_proxy")))
         m6.metric("Max Debt", fmt_millions(row.get("max_debt")))
         m7.metric("Equity Required", fmt_millions(row.get("equity_required")))
-        m8.metric("FCF Yield / Equity", fmt_pct(row.get("fcf_yield_equity")))
+        m8.metric("FCF Yield / Equity", fmt_fcf_yield_equity(row.get("fcf_yield_equity")))
 
         # Raw score for comparison
         raw = row.get("pe_score_raw", row.get("pe_score"))
@@ -472,6 +522,64 @@ def _show_company_detail(row: pd.Series):
         if raw is not None and adj is not None and not pd.isna(raw) and not pd.isna(adj):
             st.caption(f"Raw Score (universe-only): {raw:.1f} → Adjusted: {adj:.1f} "
                        f"(Δ {adj - raw:+.1f})")
+
+        # LBO Deal Breakdown expander
+        lbo_cfg = cfg.get("lbo", {})
+        holding_period = lbo_cfg.get("holding_period", 5)
+        exit_multiple_cap = lbo_cfg.get("exit_multiple", 12.0)
+        debt_repayment_rate = lbo_cfg.get("debt_repayment_rate", 0.4)
+
+        ev_val = row.get("enterprise_value")
+        ebitda_val = row.get("ebitda")
+        max_debt_val = row.get("max_debt")
+        eq_req_val = row.get("equity_required")
+
+        if (ev_val is not None and not pd.isna(ev_val) and ev_val > 0
+                and ebitda_val is not None and not pd.isna(ebitda_val)
+                and max_debt_val is not None and not pd.isna(max_debt_val)
+                and eq_req_val is not None and not pd.isna(eq_req_val)):
+
+            growth = row.get("revenue_growth") or 0.0
+            if pd.isna(growth):
+                growth = 0.0
+            growth_clipped = max(-0.05, min(0.15, growth))
+            exit_ebitda = max(ebitda_val, 0) * ((1 + growth_clipped) ** holding_period)
+
+            entry_ev_ebitda = row.get("ev_to_ebitda") or exit_multiple_cap
+            if pd.isna(entry_ev_ebitda):
+                entry_ev_ebitda = exit_multiple_cap
+            exit_mult = min(entry_ev_ebitda, exit_multiple_cap)
+
+            exit_ev = exit_ebitda * exit_mult
+
+            fcf_val = row.get("free_cash_flow") or 0.0
+            if pd.isna(fcf_val):
+                fcf_val = 0.0
+            debt_repaid = max(fcf_val, 0) * holding_period * debt_repayment_rate
+            debt_remaining = max(max_debt_val - debt_repaid, 0)
+            exit_equity = exit_ev - debt_remaining
+            moic = exit_equity / eq_req_val if eq_req_val > 0 else float("nan")
+
+            with st.expander("🧮 LBO Deal Breakdown"):
+                st.caption(
+                    f"Assumptions: {holding_period}yr hold · "
+                    f"{exit_mult:.1f}x exit multiple · "
+                    f"{debt_repayment_rate:.0%} FCF → debt repayment"
+                )
+                b1, b2, b3 = st.columns(3)
+                b1.metric("Entry EV", fmt_millions(ev_val))
+                b1.metric("Max Debt", fmt_millions(max_debt_val))
+                b1.metric("Equity Cheque", fmt_millions(eq_req_val))
+                b2.metric("Exit EBITDA", fmt_millions(exit_ebitda))
+                b2.metric("Exit Multiple", f"{exit_mult:.1f}x")
+                b2.metric("Exit EV", fmt_millions(exit_ev))
+                b3.metric("Debt Repaid", fmt_millions(debt_repaid))
+                b3.metric("Debt Remaining", fmt_millions(debt_remaining))
+                b3.metric("Exit Equity", fmt_millions(exit_equity))
+                st.markdown("---")
+                moic_col, irr_col = st.columns(2)
+                moic_col.metric("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "—")
+                irr_col.metric("IRR Proxy", fmt_irr(row.get("irr_proxy")))
 
         # Investment memo with proper line breaks
         memo = row.get("investment_memo", "")
@@ -521,13 +629,18 @@ def _show_company_detail(row: pd.Series):
         st.metric("Debt Capacity", f"{debt_capacity_color(dc)} {dc}")
 
         # Penalty breakdown
-        rf_pen = row.get("red_flag_penalty", 0)
-        val_pen = row.get("valuation_penalty", 0)
-        if rf_pen or val_pen:
-            st.caption(
-                f"Score penalties: Red flags {rf_pen:+.0f} | "
-                f"Valuation {val_pen:+.0f}"
-            )
+        rf_pen = row.get("red_flag_penalty", 0) or 0
+        val_pen = row.get("valuation_penalty", 0) or 0
+        dk_pen = row.get("deal_killer_penalty", 0) or 0
+        penalty_parts = []
+        if rf_pen:
+            penalty_parts.append(f"Red flags {rf_pen:+.0f}")
+        if val_pen:
+            penalty_parts.append(f"Valuation {val_pen:+.0f}")
+        if dk_pen:
+            penalty_parts.append(f"Deal killer {dk_pen:+.0f}")
+        if penalty_parts:
+            st.caption("Score penalties: " + " | ".join(penalty_parts))
 
 
 def _show_methodology():

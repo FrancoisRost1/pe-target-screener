@@ -185,5 +185,5 @@ def compute_fcf_yield_on_equity(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     eq_req = df["equity_required"].replace(0, np.nan)
-    df["fcf_yield_equity"] = (df["free_cash_flow"] / eq_req).clip(-0.5, 1.0)
+    df["fcf_yield_equity"] = (df["free_cash_flow"] / eq_req).clip(-0.5, 0.50)
     return df

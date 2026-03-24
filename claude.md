@@ -300,3 +300,62 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `screener/lbo.py`, `screener/ratios.py`, `screener/cleaner.py`, `screener/summary.py`, `config.yaml`, `app/streamlit_app.py`
 
 *Last updated: 2026-03-24 — Session 5*
+
+---
+
+### Session 6 — Deal Killer Logic, sector norm fix, LBO breakdown, FCF yield cap, quadrant zones
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — 🧮 LBO Deal Breakdown expander in drill-down:**
+- Added `cfg` parameter to `_show_company_detail(row, cfg)` in `streamlit_app.py`
+- Updated call site in `main()` to pass `run_cfg`
+- Expander computes full LBO waterfall inline from row: EV → max debt → equity cheque → exit EBITDA → exit EV → debt repaid → debt remaining → exit equity → MOIC + IRR
+- Displayed in 3-column grid with assumption caption (hold period, exit multiple, debt repayment rate)
+
+**FIX 2 — FCF Yield on Equity cap:**
+- `screener/lbo.py`: clipped `fcf_yield_equity` from `clip(-0.5, 1.0)` → `clip(-0.5, 0.50)`
+- Added `fmt_fcf_yield_equity()` formatter to `streamlit_app.py`: returns ">50%" if val ≥ 0.50
+- Used in drill-down Row 2 replacing `fmt_pct`
+
+**FIX 3 — Deal Killer Logic:**
+- Added `apply_deal_killer_penalty(df)` to `screener/classifier.py`
+- Penalties: irr_proxy < 0 → -20pts; irr_proxy < -0.20 → -35pts; equity_required > EV × 90% → -10pts
+- Also appends "Negative IRR" or "Deal math challenged" to `red_flags`
+- Updated `apply_score_adjustments()` in `screener/scoring.py` to import and call this function
+- `pe_score_adjusted` now includes `deal_killer_penalty` in addition to red_flag and valuation penalties
+- 21 companies penalized in current universe
+
+**FIX 4 — Sector normalization rewrite:**
+- `score_universe_sector_adjusted()` in `screener/scoring.py` rewrote to:
+  - Apply inversion independently to u_rank AND s_rank before blending (not after)
+  - Fall back to u_rank for sectors with < 3 companies
+  - Skip zero-weight metrics entirely
+  - Track `raw_u_ranks` separately for `pe_score_raw`
+- Visible impact: Graco (negative IRR) dropped from top 5; new entrants Civitas Resources, Jack Henry, AptarGroup, Sonoco
+
+**FIX 5 — Deal Quadrant colored background zones:**
+- Added 4 `rect` shapes behind scatter bubbles via `fig3.update_layout(shapes=zone_shapes)`:
+  - 🟢 Sweet Spot (low EV, high quality): rgba(46,204,113, 0.08)
+  - 🟡 Quality Premium + Value Trap: rgba(243,156,18, 0.08)
+  - 🔴 Avoid (high EV, low quality): rgba(231,76,60, 0.08)
+- Zones extend 10% beyond data range for visual polish
+
+**Top 5 PE Targets (post Session 6 fixes, 2026-03-24):**
+| Rank | Company | Sector | Adj. Score | IRR Est. | Debt Capacity |
+|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 91.5 | ~46% | Medium |
+| 2 | Stride Inc | Specialty | 81.3 | ~30% | High |
+| 3 | ExlService Holdings | Business Services | 70.8 | ~20% | Medium |
+| 4 | Cognizant Technology | Technology | 66.4 | ~18% | Medium |
+| 5 | Civitas Resources | Energy | 65.0 | ~39% | Medium |
+
+**Validation:**
+- All top 10 have positive IRR ✅
+- Graco (~-1% IRR) correctly penalized and dropped from top 10 ✅
+- 21 companies penalized by deal killer logic ✅
+- 54 companies scored after eligibility filters ✅
+
+**Files changed:** `screener/classifier.py`, `screener/scoring.py`, `screener/lbo.py`, `app/streamlit_app.py`
+
+*Last updated: 2026-03-24 — Session 6*

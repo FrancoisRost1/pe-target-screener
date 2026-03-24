@@ -113,6 +113,71 @@ def compute_valuation_penalty(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df
 
 
+def apply_deal_killer_penalty(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply penalties for deals that are fundamentally broken from an IRR standpoint.
+
+    PE context: A negative IRR proxy means the model can't generate equity returns
+    under standard LBO assumptions — the deal simply doesn't work at this price/leverage.
+    These companies should be strongly penalized regardless of quality metrics, as no
+    amount of operational improvement rescues a deal with broken entry math.
+
+    Penalties (cumulative):
+      irr_proxy < 0      → -20 pts (deal doesn't pencil)
+      irr_proxy < -0.20  → -35 pts instead (severely broken — replaces -20)
+      equity_required > EV * 90% → -10 pts (almost no leverage — buyout loses its purpose)
+
+    Also appends flag labels to red_flags for transparency in the drill-down.
+    """
+    df = df.copy()
+    penalty = pd.Series(0.0, index=df.index)
+
+    has_irr = "irr_proxy" in df.columns
+    has_eq = "equity_required" in df.columns
+    has_ev = "enterprise_value" in df.columns
+
+    if has_irr:
+        irr = df["irr_proxy"]
+        # Severely negative IRR: -35 pts (dominant tier)
+        penalty = np.where(irr.lt(-0.20).fillna(False), -35,
+                  np.where(irr.lt(0).fillna(False), -20, 0))
+        penalty = pd.Series(penalty, index=df.index, dtype=float)
+
+    if has_eq and has_ev:
+        eq = df["equity_required"].fillna(np.nan)
+        ev = df["enterprise_value"].fillna(np.nan)
+        bloated_equity = (eq > ev * 0.90).fillna(False)
+        penalty += np.where(bloated_equity, -10, 0)
+
+    df["deal_killer_penalty"] = penalty
+
+    # Append labels to red_flags for transparency
+    if "red_flags" not in df.columns:
+        df["red_flags"] = ""
+
+    if has_irr:
+        irr = df["irr_proxy"]
+        df.loc[irr.lt(-0.20).fillna(False), "red_flags"] = (
+            df.loc[irr.lt(-0.20).fillna(False), "red_flags"]
+            .apply(lambda s: (s + " | Negative IRR").lstrip(" | "))
+        )
+        mildly_neg = irr.lt(0).fillna(False) & ~irr.lt(-0.20).fillna(False)
+        df.loc[mildly_neg, "red_flags"] = (
+            df.loc[mildly_neg, "red_flags"]
+            .apply(lambda s: (s + " | Negative IRR").lstrip(" | "))
+        )
+
+    if has_eq and has_ev:
+        bloated_equity = (df["equity_required"].fillna(np.nan) > df["enterprise_value"].fillna(np.nan) * 0.90).fillna(False)
+        df.loc[bloated_equity, "red_flags"] = (
+            df.loc[bloated_equity, "red_flags"]
+            .apply(lambda s: (s + " | Deal math challenged").lstrip(" | "))
+        )
+
+    logger.info(f"Deal killer penalty: {(penalty != 0).sum()} companies penalized")
+    return df
+
+
 def _classify_debt_capacity(row: pd.Series, cfg: dict) -> str:
     """
     Classify a company's ability to take on additional LBO debt.

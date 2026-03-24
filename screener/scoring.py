@@ -14,6 +14,7 @@ committee works: "who's best in class across these dimensions?"
 import pandas as pd
 import numpy as np
 import logging
+from screener.classifier import apply_deal_killer_penalty
 
 logger = logging.getLogger(__name__)
 
@@ -75,83 +76,89 @@ def score_universe_sector_adjusted(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     Sector-adjusted scoring: blends universe-wide and within-sector percentile ranks.
 
-    Formula per metric:
-      universe_rank = percentile rank across all companies (0–100)
-      sector_rank   = percentile rank within the company's sector (0–100)
-      final_rank    = 0.6 × sector_rank + 0.4 × universe_rank
+    Per-metric formula (applied correctly at the metric level, not the score level):
+      1. universe_rank = percentile rank across all companies (0–100)
+      2. sector_rank   = percentile rank within company's sector (0–100)
+         → fall back to universe_rank for sectors with < 3 companies
+      3. Invert BOTH ranks independently if metric is in invert_metrics
+         (lower value = better, e.g. EV/EBITDA)
+      4. Fill NaN with 50 (neutral — no penalty for missing data)
+      5. blended = 0.60 × sector_rank + 0.40 × universe_rank
+
+    Weighted sum of blended scores → pe_score (sector-adjusted)
+    Weighted sum of universe_rank  → pe_score_raw (universe-only, for comparison)
 
     Rationale: A 20% EBITDA margin in Consumer Staples is exceptional.
     The same margin in Technology is below-average. Sector-relative ranking
-    rewards companies that stand out within their peer group — which is how
-    PE deal teams actually evaluate opportunities.
+    rewards companies that stand out within their peer group.
 
-    Outputs:
-      pe_score_raw      — universe-only weighted score (preserved for reference)
-      pe_score          — sector-adjusted blended score (used for ranking)
+    Key fix vs previous version: inversion is applied to each rank independently
+    before blending, ensuring the direction correction is symmetric across both
+    the universe and sector dimensions.
     """
     df = df.copy()
     weights = cfg.get("weights", {})
     invert = cfg.get("invert_metrics", [])
-
     has_sector = "sector" in df.columns and df["sector"].notna().any()
-    score_cols = []
+
+    blended_cols = []   # (score_col, weight) for pe_score
+    raw_u_ranks = []    # (u_rank_series, weight) for pe_score_raw
 
     for metric, weight in weights.items():
+        if weight == 0:
+            continue  # Skip zero-weight metrics entirely
         if metric not in df.columns:
             logger.warning(f"Metric '{metric}' not found — skipping")
             continue
 
-        series = df[metric]
         score_col = f"score_{metric}"
 
-        # Universe-wide percentile rank
-        u_rank = series.rank(method="average", na_option="keep", pct=True) * 100
+        # Step 1: Universe percentile rank
+        u_rank = df[metric].rank(method="average", na_option="keep", pct=True) * 100
 
+        # Step 2: Sector percentile rank (per-metric, not on blended scores)
         if has_sector:
-            # Within-sector percentile rank; fall back to universe rank for
-            # sectors with fewer than 3 companies (unstable percentiles)
             s_rank = df.groupby("sector")[metric].rank(
                 method="average", na_option="keep", pct=True
             ) * 100
+            # Fall back to universe rank for small sectors (< 3 companies)
             sector_size = df.groupby("sector")["sector"].transform("count")
             s_rank = s_rank.where(sector_size >= 3, u_rank)
-            blended = 0.6 * s_rank + 0.4 * u_rank
         else:
-            blended = u_rank
+            s_rank = u_rank.copy()
 
+        # Step 3: Invert both ranks independently before blending
         if metric in invert:
             u_rank = 100 - u_rank
-            blended = 100 - blended
+            s_rank = 100 - s_rank
 
+        # Step 4: Fill NaN with 50 (neutral — no penalty for missing data)
+        u_rank_filled = u_rank.fillna(50)
+        s_rank_filled = s_rank.fillna(50)
+
+        # Step 5: Blend — sector rank dominates (60%) but universe anchors (40%)
+        blended = 0.60 * s_rank_filled + 0.40 * u_rank_filled
         df[score_col] = blended
-        score_cols.append((score_col, u_rank if metric in invert else
-                           series.rank(method="average", na_option="keep", pct=True) * 100,
-                           weight))
 
-    if not score_cols:
+        blended_cols.append((score_col, weight))
+        raw_u_ranks.append((u_rank_filled, weight))
+
+    if not blended_cols:
         logger.error("No metrics could be scored")
         df["pe_score_raw"] = np.nan
         df["pe_score"] = np.nan
         return df
 
-    total_weight = sum(w for _, _, w in score_cols)
+    total_weight = sum(w for _, w in blended_cols)
 
-    # pe_score_raw: universe-only (for reference / comparison)
-    raw_scores = []
-    for score_col, u_rank_series, w in score_cols:
-        metric = score_col.replace("score_", "")
-        u_series = df[metric].rank(method="average", na_option="keep", pct=True) * 100
-        if metric in invert:
-            u_series = 100 - u_series
-        raw_scores.append((u_series, w))
-
+    # pe_score_raw: universe-only weighted sum (visible in drill-down for comparison)
     df["pe_score_raw"] = sum(
-        s.fillna(50) * (w / total_weight) for s, w in raw_scores
+        u * (w / total_weight) for u, w in raw_u_ranks
     ).round(2)
 
-    # pe_score: sector-adjusted blended
+    # pe_score: sector-adjusted blended weighted sum
     df["pe_score"] = sum(
-        df[col].fillna(50) * (w / total_weight) for col, _, w in score_cols
+        df[col] * (w / total_weight) for col, w in blended_cols
     ).round(2)
 
     logger.info(f"Sector-adjusted scoring: {df['pe_score'].notna().sum()} companies")
@@ -160,20 +167,26 @@ def score_universe_sector_adjusted(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 def apply_score_adjustments(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Apply red flag and valuation penalties to produce pe_score_adjusted.
+    Apply all score penalties to produce pe_score_adjusted.
 
-    pe_score_adjusted = pe_score + red_flag_penalty + valuation_penalty, clipped [0, 100]
+    pe_score_adjusted = pe_score + red_flag_penalty + valuation_penalty
+                        + deal_killer_penalty, clipped [0, 100]
 
-    PE context: A high raw score is necessary but not sufficient. A company
-    with strong margins but dangerous leverage or an astronomic valuation
-    deserves to be penalised before reaching a shortlist.
+    PE context: A high raw score is necessary but not sufficient. Companies
+    with dangerous leverage, expensive valuations, or broken LBO math should
+    be penalized before reaching the shortlist. Deal killer penalties are
+    applied last as they represent fundamental deal-breakers (negative IRR,
+    degenerate capital structure) that override quality metrics.
     """
     df = df.copy()
+
+    # Apply deal killer penalties first (also appends to red_flags)
+    df = apply_deal_killer_penalty(df)
+
     penalty_cols = []
-    if "red_flag_penalty" in df.columns:
-        penalty_cols.append(df["red_flag_penalty"].fillna(0))
-    if "valuation_penalty" in df.columns:
-        penalty_cols.append(df["valuation_penalty"].fillna(0))
+    for col in ("red_flag_penalty", "valuation_penalty", "deal_killer_penalty"):
+        if col in df.columns:
+            penalty_cols.append(df[col].fillna(0))
 
     total_penalty = sum(penalty_cols) if penalty_cols else 0
     df["pe_score_adjusted"] = (df["pe_score"] + total_penalty).clip(0, 100).round(2)
