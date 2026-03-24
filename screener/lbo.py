@@ -168,7 +168,8 @@ def _compute_single_irr(df: pd.DataFrame, cfg: dict,
     irr = pd.Series(np.nan, index=df.index)
     moic = exit_equity[valid] / eq_req[valid]
     irr[valid] = moic ** (1.0 / holding_period) - 1
-    return irr.clip(-0.5, 1.0)
+    # Hard cap at 40%: anything above is model noise from extreme entry multiples or FCF
+    return irr.clip(-0.50, 0.40)
 
 
 def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
@@ -214,9 +215,9 @@ def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         df["irr_downside"] = np.nan
         return df
 
-    df["irr_base"] = _compute_single_irr(df, cfg, growth_delta=0.00, exit_multiple_delta=0.0)
-    df["irr_upside"] = _compute_single_irr(df, cfg, growth_delta=+0.02, exit_multiple_delta=+1.0)
-    df["irr_downside"] = _compute_single_irr(df, cfg, growth_delta=-0.02, exit_multiple_delta=-1.0)
+    df["irr_base"] = _compute_single_irr(df, cfg, growth_delta=0.00, exit_multiple_delta=0.0).clip(-0.50, 0.40)
+    df["irr_upside"] = _compute_single_irr(df, cfg, growth_delta=+0.02, exit_multiple_delta=+1.0).clip(-0.50, 0.40)
+    df["irr_downside"] = _compute_single_irr(df, cfg, growth_delta=-0.02, exit_multiple_delta=-1.0).clip(-0.50, 0.40)
 
     # Keep irr_proxy as alias for backwards compatibility
     df["irr_proxy"] = df["irr_base"]

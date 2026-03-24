@@ -170,8 +170,8 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
     lbo_defaults = cfg.get("lbo", {})
     lbo_overrides = {
         "exit_multiple": st.sidebar.slider(
-            "Entry → Exit Multiple (x)", 6.0, 16.0,
-            float(lbo_defaults.get("exit_multiple", 10.0)), step=0.5,
+            "Entry → Exit Multiple (x)", 6.0, 14.0,
+            float(lbo_defaults.get("exit_multiple", 8.0)), step=0.5,
         ),
         "holding_period": st.sidebar.slider(
             "Holding Period (years)", 3, 7,
@@ -179,7 +179,7 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
         ),
         "target_leverage": st.sidebar.slider(
             "Target Leverage (x EBITDA)", 2.0, 6.0,
-            float(lbo_defaults.get("target_leverage", 4.0)), step=0.25,
+            float(lbo_defaults.get("target_leverage", 3.5)), step=0.25,
         ),
     }
 
@@ -519,10 +519,10 @@ def main():
 
     if selected:
         row = df_top[df_top[col_key] == selected].iloc[0]
-        _show_company_detail(row, run_cfg)
+        _show_company_detail(row, cfg=run_cfg)
 
 
-def _show_company_detail(row: pd.Series, cfg: dict):
+def _show_company_detail(row: pd.Series, cfg: dict = None):
     """Render V2 detailed view: two metric rows + LBO breakdown expander + memo."""
     col1, col2 = st.columns([2, 1])
 
@@ -593,11 +593,22 @@ def _show_company_detail(row: pd.Series, cfg: dict):
             moic = exit_equity / eq_req_val if eq_req_val > 0 else float("nan")
 
             with st.expander("🧮 LBO Deal Breakdown"):
-                st.caption(
-                    f"Assumptions: {holding_period}yr hold · "
-                    f"{exit_mult:.1f}x exit multiple (base) · "
-                    f"{debt_repayment_rate:.0%} FCF → annual debt amortization"
-                )
+                lbo_cfg_exp = cfg.get("lbo", {}) if cfg else {}
+                hp_exp = int(lbo_cfg_exp.get("holding_period", holding_period))
+                em_exp = lbo_cfg_exp.get("exit_multiple", exit_mult)
+                lev_exp = lbo_cfg_exp.get("target_leverage", 3.5)
+                dr_exp = lbo_cfg_exp.get("debt_repayment_rate", debt_repayment_rate)
+                st.markdown(f"""
+**Base Case Assumptions**
+| Parameter | Value |
+|---|---|
+| Holding period | {hp_exp} years |
+| Entry multiple | {fmt_mult(row.get("ev_to_ebitda"))} EV/EBITDA |
+| Exit multiple (cap) | {em_exp:.0f}x EV/EBITDA |
+| Target leverage | {lev_exp:.1f}x EBITDA |
+| FCF → debt repayment | {dr_exp:.0%} annually |
+""")
+                st.divider()
                 b1, b2, b3 = st.columns(3)
                 b1.metric("Entry EV", fmt_millions(ev_val))
                 b1.metric("Max Debt", fmt_millions(max_debt_val))
@@ -680,8 +691,12 @@ def _show_company_detail(row: pd.Series, cfg: dict):
                     for v in [growth_drv, delev_drv, mult_drv]
                 )
                 if drivers_valid and any(abs(v) > 0.001 for v in [growth_drv, delev_drv, mult_drv]):
-                    st.markdown("**🔑 IRR Bridge — Value Drivers**")
-                    driver_labels = ["EBITDA Growth", "Deleveraging", "Multiple Δ"]
+                    st.markdown("**🔑 IRR Decomposition (PE Return Attribution)**")
+                    driver_labels = [
+                        "EBITDA Growth contribution",
+                        "Debt paydown (deleveraging)",
+                        "Multiple contraction / expansion vs entry",
+                    ]
                     driver_vals = [growth_drv * 100, delev_drv * 100, mult_drv * 100]
                     driver_colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in driver_vals]
 
@@ -706,7 +721,7 @@ def _show_company_detail(row: pd.Series, cfg: dict):
                                    range=[-y_abs_max, y_abs_max]),
                         xaxis=dict(title=""),
                         title=dict(
-                            text=f"IRR = {fmt_irr(irr_base_val)} | Value Driver Attribution",
+                            text=f"Base IRR: {fmt_irr(irr_base_val)} — attribution by value driver",
                             font=dict(size=12),
                         ),
                     )

@@ -497,3 +497,51 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `screener/lbo.py`, `screener/scoring.py`, `screener/ranking.py`, `main.py`, `app/streamlit_app.py`
 
 *Last updated: 2026-03-24 — Session 8*
+
+---
+
+### Session 9 — IRR cap 40%, realistic LBO defaults, return attribution labels, assumptions table
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — Cap IRR to realistic PE ranges:**
+- `config.yaml`: `target_leverage` 4.0 → 3.5x; `exit_multiple` 10.0 → 8.0x; min/max updated to 7.0/12.0
+- `lbo.py` `_compute_single_irr()`: hard cap changed from `clip(-0.5, 1.0)` → `clip(-0.50, 0.40)`
+- `lbo.py` `compute_scenario_irr()`: explicit `.clip(-0.50, 0.40)` on each scenario column
+- Sidebar sliders: Exit Multiple default 10.0→8.0, range 6→14; Target Leverage default 4.0→3.5
+- Results: Cal-Maine capped at 40% (was 86%), Civitas at 40% (was 70%), Stride at 31% ✅
+- Viable deals (positive IRR) median: 9.5% — in 8-18% target range ✅
+- No company above 40% ✅
+- Note: full 54-company universe median = -6.2% (expected — most public cos don't pencil as LBOs at 8x exit/3.5x leverage). Market context alert fires correctly.
+
+**FIX 2 — IRR Bridge label improvements:**
+- Section header: "IRR Bridge — Value Drivers" → "IRR Decomposition (PE Return Attribution)"
+- Driver labels: "EBITDA Growth" → "EBITDA Growth contribution"; "Deleveraging" → "Debt paydown (deleveraging)"; "Multiple Δ" → "Multiple contraction / expansion vs entry"
+- Chart title: "IRR = X | Drivers" → "Base IRR: X — attribution by value driver"
+
+**FIX 3 — LBO assumptions summary table at top of expander:**
+- Added markdown table with 5 parameters at top of 🧮 LBO Deal Breakdown expander
+- Shows: Holding period, Entry multiple (actual EV/EBITDA), Exit multiple cap, Target leverage, FCF→debt repayment rate
+- Replaced the old `st.caption()` line with the table
+- Added `st.divider()` after the table for visual separation
+- Updated `_show_company_detail(row, cfg: dict = None)` signature (default=None for safety)
+- Updated call site to `_show_company_detail(row, cfg=run_cfg)` (keyword arg)
+
+**Top 5 PE Targets (post Session 9, 2026-03-24):**
+| Rank | Company | Sector | Final Score | IRR Base | IRR Down | IRR Up | Debt Capacity |
+|---|---|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 94.5 | ~40% | ~40% | ~40% | Medium |
+| 2 | Stride Inc | Specialty | 86.6 | ~31% | ~24% | ~37% | High |
+| 3 | Civitas Resources | Energy | 78.7 | ~40% | ~40% | ~40% | Medium |
+| 4 | ExlService Holdings | Business Services | 76.5 | ~10% | ~4% | ~15% | Medium |
+| 5 | Cognizant Technology | Technology | 76.2 | ~17% | ~9% | ~23% | Medium |
+
+**Validation:**
+- No company above 40% IRR ✅
+- Viable deals median: 9.5% (in 8-18% range) ✅
+- Market context alert fires (full universe median < 12%) ✅
+- Deal killer now penalizes 36 companies (up from 29 — more deals don't pencil at 8x/3.5x) ✅
+
+**Files changed:** `config.yaml`, `screener/lbo.py`, `app/streamlit_app.py`
+
+*Last updated: 2026-03-24 — Session 9*
