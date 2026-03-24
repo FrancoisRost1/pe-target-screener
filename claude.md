@@ -545,3 +545,70 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `config.yaml`, `screener/lbo.py`, `app/streamlit_app.py`
 
 *Last updated: 2026-03-24 — Session 9*
+
+---
+
+### Session 10 — Interest waterfall, scenario spread, IRR bridge fix, entry floor, deal breaker 10%
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — Scenario spread: FCF compression in downside:**
+- Added `fcf_conversion_mult=1.0` parameter to `_compute_single_irr()` in `lbo.py`
+- Downside: `growth_delta=-0.03, exit_multiple_delta=-1.0, fcf_conversion_mult=0.80`
+- Upside: `growth_delta=+0.02, exit_multiple_delta=+0.5, fcf_conversion_mult=1.0`
+- Asymmetric: downside miss (-3%) larger than upside beat (+2%), downside FCF stressed at 80%
+- Result: 90.7% of companies have spread ≥ 8%; median spread = 11.6%
+
+**FIX 2 — IRR Bridge: isolation method for correct attribution:**
+- Added `force_exit_at_entry_multiple=False` parameter to `_compute_single_irr()`
+- Rewrote `compute_irr_bridge()` with isolation baseline method:
+  - Baseline = zero growth + no deleverage + exit at entry multiple (floor return)
+  - Growth driver = IRR(real growth, no delev, exit at entry) - baseline
+  - Deleverage driver = IRR(zero growth, real delev, exit at entry) - baseline
+  - Multiple driver = IRR(zero growth, no delev, exit at cap) - baseline
+- Bridge sum ≈ irr_base for most companies (±3pp); exceptions are capped companies (40%) where baseline also hits cap → all drivers show 0% (expected)
+
+**FIX 3 — Interest cost waterfall in LBO amortization:**
+- Updated `_amortize_debt()` in `lbo.py`: each year pays interest first (debt × rate), then sweeps remaining FCF to principal
+- Added `debt_interest_rate: 0.07` to `config.yaml` lbo section
+- Impact: reduces FCF available for debt paydown, increases debt at exit, lowers IRRs (more conservative)
+
+**FIX 4 — Entry multiple floor 6x (data integrity):**
+- `_compute_single_irr()`: now computes entry multiple from raw EV/EBITDA (bypasses winsorized NaN), clipped to 6.0x minimum
+  - Critical fix: avoids "free multiple expansion" artifact where NaN ev_to_ebitda defaulted to 8x cap
+  - WEX example: irr_base corrected from 26.1% → 12.9% (was 5.1x EV/EBITDA, inflated to 8x)
+- `cleaner.py` `winsorize_ratios()`: sets ev_to_ebitda < 6x to NaN for scoring (no signal below 6x)
+
+**FIX 5 — Deal breaker: IRR hurdle penalty on pe_score_final:**
+- Added `apply_irr_hurdle_penalty(df)` to `scoring.py`, called as Step 4 in `apply_score_adjustments()`
+- `irr_base < 0%` → `pe_score_final = 0`
+- `irr_base 0-10%` → `pe_score_final × 0.40` (60% reduction)
+- `irr_base < 10%` → adds "IRR below hurdle" to `red_flags`
+- 46 companies penalized (universe of 54) — correct; most public cos don't pencil at 8x exit/3.5x leverage
+
+**FIX 6 — Investment memo: RETURN DRIVERS attribution sentence:**
+- Updated `generate_memo()` in `summary.py`
+- Added 5th line: `RETURN DRIVERS: Base IRR ~X% driven by EBITDA growth (+X%), debt paydown (+X%), multiple (+X%).`
+- Only shown when all 4 values (`irr_base`, `irr_driver_*`) are non-NaN
+
+**Top 5 PE Targets (post Session 10, 2026-03-24):**
+| Rank | Company | Sector | Final Score | IRR Base | IRR Down | IRR Up | Debt Capacity |
+|---|---|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 90.8 | ~40% | ~40% | ~40% | Medium |
+| 2 | Stride Inc | Specialty | 86.8 | ~30% | ~21% | ~35% | High |
+| 3 | Cognizant Technology | Technology | 75.7 | ~15% | ~4% | ~20% | Medium |
+| 4 | Civitas Resources | Energy | 75.6 | ~40% | ~40% | ~40% | Medium |
+| 5 | Sonoco Products | Packaging | 72.8 | ~35% | ~29% | ~37% | Medium |
+
+**Validation:**
+- Median up-down spread: 11.6% (90.7% of companies ≥ 8%) ✅
+- IRR bridge sum ≈ irr_base for non-capped companies (within ±3pp) ✅
+- ev_to_ebitda < 6x: 0 companies in scored universe ✅
+- WEX IRR corrected: 26.1% → 12.9% (entry multiple bug fixed) ✅
+- IRR hurdle penalty: 46 companies penalized ✅
+- RETURN DRIVERS line in memos ✅
+- Cal-Maine/Civitas hit 40% cap on all scenarios (spread = 0% — expected limitation of hard cap)
+
+**Files changed:** `screener/lbo.py`, `screener/cleaner.py`, `screener/scoring.py`, `screener/summary.py`, `config.yaml`
+
+*Last updated: 2026-03-24 — Session 10*

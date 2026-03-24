@@ -201,6 +201,9 @@ def apply_score_adjustments(df: pd.DataFrame) -> pd.DataFrame:
     # Step 3: blend quality score with IRR signal for return-first ranking
     df = compute_irr_blended_score(df)
 
+    # Step 4: IRR hurdle penalty on pe_score_final (deal-breaker logic)
+    df = apply_irr_hurdle_penalty(df)
+
     return df
 
 
@@ -233,6 +236,56 @@ def compute_irr_blended_score(df: pd.DataFrame) -> pd.DataFrame:
         0.40 * df["irr_score"]
     ).clip(0, 100).round(2)
 
+    return df
+
+
+def apply_irr_hurdle_penalty(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply IRR hurdle penalty directly to pe_score_final (after IRR blending).
+
+    PE context: An LBO fund's hurdle rate is typically 8–10% net IRR. If the model
+    shows base-case IRR below 10%, the deal should not rank among the top targets
+    regardless of business quality — a great company at a price that doesn't pencil
+    is not a PE investment. This is distinct from the deal-killer on pe_score_adjusted
+    (which catches negative IRR) — this catches sub-threshold positive IRR deals.
+
+    Logic (applied to pe_score_final):
+      irr_base < 0%   → pe_score_final = 0 (deal is broken)
+      irr_base < 10%  → pe_score_final × 0.40 (60% reduction — deal is stretched)
+      irr_base >= 10% → no change
+
+    Also adds "IRR below hurdle" to red_flags for irr_base < 10%.
+    """
+    if "pe_score_final" not in df.columns or "irr_base" not in df.columns:
+        return df
+
+    df = df.copy()
+    irr = df["irr_base"]
+
+    if "red_flags" not in df.columns:
+        df["red_flags"] = ""
+
+    # IRR < 0%: zero out pe_score_final (deal is dead)
+    zero_mask = irr.notna() & (irr < 0)
+    df.loc[zero_mask, "pe_score_final"] = 0.0
+
+    # IRR >= 0% but < 10%: apply 60% reduction
+    hurdle_mask = irr.notna() & (irr >= 0) & (irr < 0.10)
+    df.loc[hurdle_mask, "pe_score_final"] = (
+        df.loc[hurdle_mask, "pe_score_final"] * 0.40
+    ).round(2)
+
+    # Add "IRR below hurdle" flag for all below-threshold companies
+    below_hurdle = irr.notna() & (irr < 0.10)
+    for idx in df.index[below_hurdle]:
+        existing = df.at[idx, "red_flags"]
+        if not existing or (isinstance(existing, float) and pd.isna(existing)):
+            df.at[idx, "red_flags"] = "IRR below hurdle"
+        elif "IRR below hurdle" not in str(existing):
+            df.at[idx, "red_flags"] = str(existing) + " | IRR below hurdle"
+
+    penalized = below_hurdle.sum()
+    logger.info(f"IRR hurdle penalty: {penalized} companies below 10% hurdle")
     return df
 
 

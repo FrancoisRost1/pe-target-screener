@@ -102,9 +102,12 @@ def winsorize_ratios(df: pd.DataFrame) -> pd.DataFrame:
         df["interest_coverage"] = df["interest_coverage"].clip(upper=50.0)
 
     if "ev_to_ebitda" in df.columns:
-        # Negative EV/EBITDA = negative enterprise value or negative EBITDA.
-        # Neither is interpretable for buyout valuation purposes.
-        df.loc[df["ev_to_ebitda"] < 0, "ev_to_ebitda"] = np.nan
+        # Negative or below 6x EV/EBITDA = data error in an LBO context.
+        # Real buyout targets don't trade below 4-5x; values below 6x are
+        # almost always stale data or sector misclassification artifacts.
+        df["ev_to_ebitda"] = df["ev_to_ebitda"].where(
+            df["ev_to_ebitda"].isna() | (df["ev_to_ebitda"] >= 6.0), np.nan
+        )
 
     if "net_debt_to_ebitda" in df.columns:
         df["net_debt_to_ebitda"] = df["net_debt_to_ebitda"].clip(-5.0, 15.0)

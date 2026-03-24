@@ -88,7 +88,8 @@ lbo:
   exit_multiple: 8.0            # EV/EBITDA at exit — base case cap (realistic)
   exit_multiple_min: 7.0        # Downside scenario exit cap
   exit_multiple_max: 12.0       # Upside scenario exit cap
-  debt_repayment_rate: 0.4      # Annual FCF fraction applied to debt amortization
+  debt_repayment_rate: 0.4      # Annual FCF fraction applied to debt amortization (after interest)
+  debt_interest_rate: 0.07      # Annual interest rate on outstanding debt (waterfall: interest first)
 
 # -------------------------------------------------------------------
 # Data source

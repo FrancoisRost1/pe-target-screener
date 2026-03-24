@@ -155,13 +155,35 @@ def generate_memo(row: pd.Series) -> str:
     bull_text = "; ".join(bull[:3]) + "." if bull else "No standout strengths identified."
     bear_text = "; ".join(bear[:2]) + "." if bear else "No major concerns."
 
-    return "\n".join([
+    # ── Return drivers attribution (FIX 6) ───────────────────────────────────
+    irr_b = row.get("irr_base")
+    growth_d = row.get("irr_driver_growth")
+    delev_d = row.get("irr_driver_deleveraging")
+    mult_d = row.get("irr_driver_multiple")
+
+    drivers_line = ""
+    if all(
+        v is not None and not pd.isna(v)
+        for v in [irr_b, growth_d, delev_d, mult_d]
+    ):
+        drivers_line = (
+            f"RETURN DRIVERS: Base IRR ~{irr_b:.0%} driven by "
+            f"EBITDA growth ({growth_d:+.0%}), "
+            f"debt paydown ({delev_d:+.0%}), "
+            f"multiple ({mult_d:+.0%})."
+        )
+
+    lines = [
         header,
         "",
         f"BULL CASE: {bull_text}",
         f"BEAR CASE: {bear_text}",
         f"KEY RISK:  {key_risk}.",
-    ])
+    ]
+    if drivers_line:
+        lines.append(drivers_line)
+
+    return "\n".join(lines)
 
 
 def add_memos(df: pd.DataFrame, top_n: int = 20) -> pd.DataFrame:

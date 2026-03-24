@@ -8,10 +8,11 @@ For each company, estimates:
 - IRR bridge: decomposition into growth, deleveraging, and multiple drivers
 
 Assumptions (all overridable via config.yaml lbo: section):
-  target_leverage:     4.0x EBITDA (max debt, subject to 70% EV cap)
+  target_leverage:     3.5x EBITDA (max debt, subject to 70% EV cap)
   holding_period:      5 years
   exit_multiple:       min(entry EV/EBITDA, cap) — never exit above cap without delta
-  debt_repayment_rate: 40% of annual FCF reduces debt each year (realistic amortization)
+  debt_repayment_rate: 40% of post-interest FCF reduces debt each year
+  debt_interest_rate:  7% annual interest on outstanding debt (waterfall: interest first)
 
 PE context: A screener without return estimation is incomplete.
 Even a rough IRR tells you whether a deal can work at current prices.
@@ -59,7 +60,7 @@ def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     PE context: The equity cheque is what the sponsor actually risks.
     """
     lbo = cfg.get("lbo", {})
-    target_leverage = lbo.get("target_leverage", 4.0)
+    target_leverage = lbo.get("target_leverage", 3.5)
 
     if "enterprise_value" not in df.columns or "ebitda" not in df.columns:
         df["max_debt"] = np.nan
@@ -89,22 +90,31 @@ def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def _amortize_debt(max_debt: pd.Series, annual_fcf: pd.Series,
-                   debt_repayment_rate: float, holding_period: int) -> pd.Series:
+                   debt_repayment_rate: float, holding_period: int,
+                   interest_rate: float = 0.0) -> pd.Series:
     """
     Simulate realistic annual debt amortization over the holding period.
 
-    Each year: repay min(FCF × rate, remaining_debt).
+    Each year waterfall:
+      1. Compute interest cost on outstanding debt (debt × interest_rate)
+      2. FCF after interest = max(FCF - interest, 0)
+      3. Repay min(FCF_after_interest × rate, remaining_debt)
+
     Once debt hits zero, no further repayment — no negative debt.
 
-    PE context: Annual amortization captures the compounding effect of debt
-    reduction: as debt falls, interest expense drops, FCF improves. This is
-    more realistic than a lump-sum bullet repayment assumption.
+    PE context: Interest is the first call on FCF — it must be paid before any
+    principal repayment. Without the interest waterfall, the model overstates
+    debt paydown speed. At 7% on $500M of debt = $35M/yr less available for
+    sweep. This materially affects the exit equity value, especially for
+    low-FCF businesses where interest consumes most of free cash flow.
     """
     debt = max_debt.copy().fillna(0.0)
     fcf_clipped = annual_fcf.clip(lower=0)
 
     for _ in range(holding_period):
-        annual_repayment = (fcf_clipped * debt_repayment_rate).clip(upper=debt)
+        interest_cost = debt * interest_rate
+        fcf_after_interest = (fcf_clipped - interest_cost).clip(lower=0)
+        annual_repayment = (fcf_after_interest * debt_repayment_rate).clip(upper=debt)
         debt = (debt - annual_repayment).clip(lower=0)
 
     return debt
@@ -112,25 +122,32 @@ def _amortize_debt(max_debt: pd.Series, annual_fcf: pd.Series,
 
 def _compute_single_irr(df: pd.DataFrame, cfg: dict,
                          growth_delta: float = 0.0,
-                         exit_multiple_delta: float = 0.0) -> pd.Series:
+                         exit_multiple_delta: float = 0.0,
+                         fcf_conversion_mult: float = 1.0,
+                         force_exit_at_entry_multiple: bool = False) -> pd.Series:
     """
-    Compute IRR for a single scenario by adjusting growth and exit multiple.
+    Compute IRR for a single scenario.
 
-    growth_delta: added to revenue_growth before clipping to realistic range.
-      Wider clip range (-10%, +20%) vs base ensures real spread between scenarios.
+    Parameters:
+      growth_delta: added to revenue_growth before clipping to (-10%, +20%)
+      exit_multiple_delta: additive shift on exit multiple (ignored if force_exit_at_entry_multiple)
+      fcf_conversion_mult: FCF multiplier before amortization loop.
+        1.0 = base/upside; 0.80 = downside (stress FCF by 20% — captures
+        revenue miss + margin compression compounding effect on cash generation)
+      force_exit_at_entry_multiple: if True, exit at raw entry multiple (no cap, no delta).
+        Used in IRR bridge baseline to isolate the multiple driver.
 
-    exit_multiple_delta: added to the base exit multiple (min(entry, cap)).
-      Applied AFTER clipping at the cap — so upside can exceed entry for cheap names.
-      Floored at 4x to prevent degenerate scenarios.
-
-    PE context: Scenario analysis is only useful if the scenarios actually differ.
-    The previous implementation clipped into the same value for high-growth companies.
-    This version uses a wider range so upside and downside produce real spread.
+    PE context: fcf_conversion_mult creates asymmetric downside — a revenue miss
+    compresses margins, which compresses FCF more than linearly. Using 0.80× FCF
+    in downside leaves more debt at exit, directly reducing equity proceeds.
+    Entry multiple floored at 6x (FIX 4): values below 6x signal data errors —
+    real LBO targets don't trade below 4-5x EBITDA.
     """
     lbo = cfg.get("lbo", {})
     holding_period = lbo.get("holding_period", 5)
-    exit_multiple_cap = lbo.get("exit_multiple", 10.0)
+    exit_multiple_cap = lbo.get("exit_multiple", 8.0)
     debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
+    interest_rate = lbo.get("debt_interest_rate", 0.07)
 
     required_cols = {"ebitda", "equity_required", "max_debt"}
     if not required_cols.issubset(df.columns):
@@ -141,22 +158,43 @@ def _compute_single_irr(df: pd.DataFrame, cfg: dict,
         else pd.Series(0.0, index=df.index)
     growth = (base_growth + growth_delta).clip(-0.10, 0.20)
 
-    # Exit multiple: min(entry, cap) + delta, floored at 4x
-    entry_ev_ebitda = df["ev_to_ebitda"].fillna(exit_multiple_cap) \
-        if "ev_to_ebitda" in df.columns \
-        else pd.Series(exit_multiple_cap, index=df.index)
-    exit_multiple = (
-        entry_ev_ebitda.clip(upper=exit_multiple_cap) + exit_multiple_delta
-    ).clip(lower=4.0)
+    # Entry multiple: compute from raw EV / EBITDA (bypasses NaN set by winsorization).
+    # The winsorized ev_to_ebitda column sets < 6x to NaN for scoring, but for IRR
+    # we must use the actual entry multiple floored at 6x — not fall back to the cap.
+    # Falling back to the 8x cap for a 5x entry company models free multiple expansion.
+    if "enterprise_value" in df.columns and "ebitda" in df.columns:
+        raw_ev_ebitda = (
+            df["enterprise_value"] / df["ebitda"].replace(0, np.nan)
+        )
+        entry_ev_ebitda = raw_ev_ebitda.clip(lower=6.0).fillna(exit_multiple_cap)
+    elif "ev_to_ebitda" in df.columns:
+        entry_ev_ebitda = df["ev_to_ebitda"].fillna(exit_multiple_cap).clip(lower=6.0)
+    else:
+        entry_ev_ebitda = pd.Series(exit_multiple_cap, index=df.index)
+
+    if force_exit_at_entry_multiple:
+        # Exit at raw entry multiple — used for IRR bridge baseline isolation
+        exit_multiple = entry_ev_ebitda
+    else:
+        # Normal mode: cap at config, add delta, floor at 4x
+        exit_multiple = (
+            entry_ev_ebitda.clip(upper=exit_multiple_cap) + exit_multiple_delta
+        ).clip(lower=4.0)
 
     exit_ebitda = df["ebitda"].clip(lower=0) * ((1 + growth) ** holding_period)
     exit_ev = exit_ebitda * exit_multiple
 
-    # Annual debt amortization
+    # FCF stressed by fcf_conversion_mult (FIX 1: downside FCF compression)
     annual_fcf = df["free_cash_flow"].fillna(0.0).clip(lower=0) \
         if "free_cash_flow" in df.columns \
         else pd.Series(0.0, index=df.index)
-    debt_remaining = _amortize_debt(df["max_debt"], annual_fcf, debt_repayment_rate, holding_period)
+    annual_fcf_stressed = annual_fcf * fcf_conversion_mult
+
+    # Annual debt amortization with interest waterfall (FIX 3)
+    debt_remaining = _amortize_debt(
+        df["max_debt"], annual_fcf_stressed, debt_repayment_rate,
+        holding_period, interest_rate
+    )
 
     exit_equity = exit_ev - debt_remaining
     eq_req = df["equity_required"]
@@ -177,7 +215,7 @@ def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     Compute base-case IRR proxy.
 
     exit_multiple = min(entry EV/EBITDA, config cap) — never exits above cap.
-    Debt amortization uses annual loop per _amortize_debt().
+    Debt amortization uses annual loop per _amortize_debt() with interest waterfall.
 
     PE context: Key discipline — the model NEVER exits above the configured cap.
     Most LBO models fail by assuming multiple expansion. This assumes contraction.
@@ -200,13 +238,15 @@ def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     The downside case is what kills deals. The upside case is what gets them approved.
     Showing the range = showing PE thinking.
 
-    Base:     growth as-is,    exit multiple cap unchanged
-    Upside:   growth + 2%,     exit multiple cap + 1x (allows modest expansion for cheap names)
-    Downside: growth - 2%,     exit multiple cap - 1x (compression + growth miss)
+    Base:     growth as-is,     FCF at 100%,  exit multiple cap unchanged
+    Upside:   growth + 2%,      FCF at 100%,  exit multiple cap + 0.5x
+    Downside: growth - 3%,      FCF at 80%,   exit multiple cap - 1x
+      → Downside uses fcf_conversion_mult=0.80 to stress FCF (revenue miss + margin compression)
+      → Asymmetric: downside growth miss (-3%) is larger than upside beat (+2%) by design
 
-    Key vs previous: growth clips to (-10%, +20%) so ±2% creates real spread
-    even for high-growth companies. Exit delta is additive after base clip,
-    ensuring scenarios differ even when entry << cap.
+    Key vs previous: growth clips to (-10%, +20%) so ±3%/2% creates real spread.
+    Exit delta is additive after base clip, ensuring scenarios differ even when entry << cap.
+    FCF stress in downside creates additional spread beyond just growth/multiple assumptions.
     """
     required_cols = {"ebitda", "equity_required", "max_debt"}
     if not required_cols.issubset(df.columns):
@@ -215,9 +255,17 @@ def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         df["irr_downside"] = np.nan
         return df
 
-    df["irr_base"] = _compute_single_irr(df, cfg, growth_delta=0.00, exit_multiple_delta=0.0).clip(-0.50, 0.40)
-    df["irr_upside"] = _compute_single_irr(df, cfg, growth_delta=+0.02, exit_multiple_delta=+1.0).clip(-0.50, 0.40)
-    df["irr_downside"] = _compute_single_irr(df, cfg, growth_delta=-0.02, exit_multiple_delta=-1.0).clip(-0.50, 0.40)
+    df["irr_base"] = _compute_single_irr(
+        df, cfg, growth_delta=0.00, exit_multiple_delta=0.0, fcf_conversion_mult=1.0
+    ).clip(-0.50, 0.40)
+
+    df["irr_upside"] = _compute_single_irr(
+        df, cfg, growth_delta=+0.02, exit_multiple_delta=+0.5, fcf_conversion_mult=1.0
+    ).clip(-0.50, 0.40)
+
+    df["irr_downside"] = _compute_single_irr(
+        df, cfg, growth_delta=-0.03, exit_multiple_delta=-1.0, fcf_conversion_mult=0.80
+    ).clip(-0.50, 0.40)
 
     # Keep irr_proxy as alias for backwards compatibility
     df["irr_proxy"] = df["irr_base"]
@@ -233,23 +281,27 @@ def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 def compute_irr_bridge(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
-    Decompose the base-case IRR into its 3 main value drivers.
+    Decompose the base-case IRR into its 3 main value drivers using isolation method.
 
     PE context: An IRR number alone is meaningless to an IC.
     They want to know WHERE the return comes from:
-    - EBITDA growth contribution: what the company's organic growth adds vs flat
+    - EBITDA growth contribution: what the company's organic growth adds vs zero growth
     - Deleveraging contribution: debt paydown → more equity value at exit
-    - Multiple delta: effect of exit cap constraint vs exiting at entry multiple
+    - Multiple delta: effect of exit cap vs exiting at entry multiple
+      → negative when entry > cap (compression hurts); ~0 when entry <= cap
 
-    Method: compare base IRR against a counterfactual where each driver is removed.
+    Method (isolation baseline):
+      Baseline = zero growth + no debt repayment + exit at entry multiple
+        (the "do nothing" scenario — measures the floor return from entry alone)
 
-    Growth driver:    irr_base - irr_with_zero_revenue_growth
-    Deleverage driver: irr_base - irr_with_no_debt_repayment
-    Multiple driver:  irr_base - irr_if_exit_at_entry_multiple (no cap constraint)
-      → negative when entry > cap (compression hurts); 0 when entry <= cap (no compression)
+      Growth driver:     IRR(real growth, no delev, exit at entry) - baseline
+      Deleverage driver: IRR(zero growth, real delev, exit at entry) - baseline
+      Multiple driver:   IRR(zero growth, no delev, exit at cap)    - baseline
+        → negative when cap < entry (multiple compression); ~0 when entry <= cap
 
-    This is approximate attribution — directional correctness matters more than
-    exact decomposition (which requires a Shapley value calculation).
+    The three drivers approximately sum to irr_base — exact decomposition would
+    require Shapley values; this isolation method is directionally correct and
+    matches IC intuition about return attribution.
     """
     required = {"ebitda", "equity_required", "max_debt", "irr_base"}
     if not required.issubset(df.columns):
@@ -258,31 +310,39 @@ def compute_irr_bridge(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         df["irr_driver_multiple"] = np.nan
         return df
 
-    irr_base = df["irr_base"]
-
-    # --- Growth driver ---
-    # Compare base (actual growth) vs zero growth
+    # --- Baseline: zero growth + no deleverage + exit at entry multiple ---
     df_zero_growth = df.copy()
     df_zero_growth["revenue_growth"] = 0.0
-    irr_zero_growth = _compute_single_irr(df_zero_growth, cfg)
-    df["irr_driver_growth"] = (irr_base - irr_zero_growth).round(4)
-
-    # --- Deleverage driver ---
-    # Compare base amortization vs no debt repayment (rate = 0)
     cfg_no_delev = {**cfg, "lbo": {**cfg.get("lbo", {}), "debt_repayment_rate": 0.0}}
-    irr_no_delev = _compute_single_irr(df, cfg_no_delev)
-    df["irr_driver_deleveraging"] = (irr_base - irr_no_delev).round(4)
 
-    # --- Multiple driver ---
-    # Compare base exit (capped) vs exiting at entry multiple (no cap constraint)
-    # Positive exit_multiple cap of 999 effectively removes the cap
-    cfg_no_cap = {**cfg, "lbo": {**cfg.get("lbo", {}), "exit_multiple": 999.0}}
-    irr_no_cap = _compute_single_irr(df, cfg_no_cap)
-    # irr_base uses min(entry, cap); irr_no_cap uses entry → irr_no_cap >= irr_base when entry > cap
-    # driver = irr_base - irr_no_cap → negative = cap compresses multiple (hurts), 0 = no compression
-    df["irr_driver_multiple"] = (irr_base - irr_no_cap).round(4)
+    irr_baseline = _compute_single_irr(
+        df_zero_growth, cfg_no_delev, force_exit_at_entry_multiple=True
+    )
 
-    logger.info("IRR bridge (growth / deleveraging / multiple) computed")
+    # --- Growth driver: add real growth vs baseline ---
+    # (actual growth, no deleverage, exit at entry multiple)
+    irr_with_growth = _compute_single_irr(
+        df, cfg_no_delev, force_exit_at_entry_multiple=True
+    )
+    df["irr_driver_growth"] = (irr_with_growth - irr_baseline).round(4)
+
+    # --- Deleverage driver: add real debt paydown vs baseline ---
+    # (zero growth, real deleverage, exit at entry multiple)
+    irr_with_delev = _compute_single_irr(
+        df_zero_growth, cfg, force_exit_at_entry_multiple=True
+    )
+    df["irr_driver_deleveraging"] = (irr_with_delev - irr_baseline).round(4)
+
+    # --- Multiple driver: exit at cap vs exit at entry multiple ---
+    # (zero growth, no deleverage, normal exit — cap applies)
+    # Positive when entry > cap (cap helps = entry too rich → not applicable for cheap names)
+    # Negative when cap < entry (cap hurts = compression); ~0 when entry <= cap
+    irr_with_cap = _compute_single_irr(
+        df_zero_growth, cfg_no_delev
+    )
+    df["irr_driver_multiple"] = (irr_with_cap - irr_baseline).round(4)
+
+    logger.info("IRR bridge (growth / deleveraging / multiple) computed via isolation method")
     return df
 
 
