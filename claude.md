@@ -1,0 +1,248 @@
+# claude.md — Private Equity Target Screener
+
+> Dual purpose: instructions for Claude Code + living journal of the project.
+> Update this file after every significant session or decision.
+
+---
+
+## 1. What this project is
+
+A Python-based screening engine that identifies potential LBO/buyout candidates from a universe of public companies.  
+It fetches real financial data (via `yfinance`), computes PE-relevant metrics, scores each company using a weighted model, classifies debt capacity, flags red flags, and surfaces a ranked shortlist.  
+Final deliverable: a modular Python pipeline + interactive Streamlit dashboard.
+
+**GitHub repo name:** `pe-target-screener`
+
+---
+
+## 2. Instructions for Claude Code
+
+### Philosophy
+- Always write modular code. One file = one responsibility.
+- Never put business logic in `main.py`. It only orchestrates.
+- All weights, thresholds, and assumptions live in `config.yaml`. Never hardcode them.
+- Handle edge cases: division by zero, missing values, negative EBITDA, negative EV.
+- Every function must have a docstring explaining the PE rationale, not just what the code does.
+
+### Module responsibilities
+| File | Role |
+|---|---|
+| `screener/loader.py` | Fetch data from yfinance, validate columns |
+| `screener/cleaner.py` | Type casting, NaN handling, outlier detection |
+| `screener/ratios.py` | Compute all financial ratios |
+| `screener/scoring.py` | Normalize metrics, apply weights → pe_score |
+| `screener/classifier.py` | Debt capacity (High/Medium/Low) + red flags |
+| `screener/ranking.py` | Sort, assign rank, build top-N list |
+| `screener/exporter.py` | Output to CSV and Excel |
+| `screener/summary.py` | Auto-generate investment memo snippet per company |
+| `app/streamlit_app.py` | Full interactive dashboard |
+
+### Coding standards
+- Use `pandas` for all data manipulation
+- Use `numpy` only where needed (percentile, clip)
+- Config loaded once via `utils/config_loader.py`, passed as dict
+- All ratio functions take a `pd.DataFrame`, return a `pd.DataFrame`
+- Scoring uses **percentile ranking** (not min-max) — more robust to outliers
+- For metrics where lower = better (Net Debt/EBITDA, EV/EBITDA), invert the rank
+- `red_flags` column = pipe-separated string of flag labels, empty string if none
+
+### Data source
+- Primary: `yfinance` — real public company financials
+- Universe: ~100 mid/large cap companies across 6–8 sectors (Industrials, Healthcare, Technology, Consumer Staples, Business Services, Packaging, Infrastructure, Energy)
+- Ticker list stored in `data/sample/universe_tickers.csv`
+- Raw fetched data saved to `data/raw/companies_raw.csv`
+- Processed + scored data saved to `data/processed/companies_scored.csv`
+
+### Error handling rules
+- Division by zero → return `np.nan`, never raise
+- If EBITDA ≤ 0, company is flagged but not dropped (unless filter_ineligible=True)
+- If a required column is missing after fetch, log warning and skip that metric
+- Never break the pipeline on a single company's bad data
+
+---
+
+## 3. Project Roadmap
+
+### Phase 1 — Foundation ✅
+- [x] Repo structure
+- [x] claude.md
+- [x] README.md
+- [x] config.yaml
+- [x] requirements.txt
+- [x] .gitignore
+
+### Phase 2 — Data ✅
+- [x] Build universe ticker list (90 real tickers, 8 sectors)
+- [x] loader.py — fetch from yfinance with graceful error handling
+- [x] cleaner.py — type casting, dedup, data quality flags, eligibility filters
+
+### Phase 3 — Analytics ✅
+- [x] ratios.py — 11 metrics with PE rationale docstrings
+- [x] scoring.py — percentile ranking + weighted scoring + 4 sub-scores
+- [x] classifier.py — debt capacity (High/Medium/Low) + red flag detection
+
+### Phase 4 — Output ✅
+- [x] ranking.py — sort, assign rank, top-N
+- [x] exporter.py — CSV + Excel
+- [x] summary.py — auto investment memo generator
+
+### Phase 5 — Dashboard ✅
+- [x] streamlit_app.py — full interactive UI (filters, charts, radar, drill-down, download)
+
+### Phase 6 — Quality ✅
+- [x] tests/test_ratios.py — 8 ratio tests
+- [x] tests/test_scoring.py — 2 scoring tests
+- [x] tests/test_cleaner.py — 3 cleaner + eligibility tests
+- [x] tests/test_classifier.py — debt capacity test
+- [x] All 14 tests passing ✅
+- [x] notebooks/exploratory_analysis.ipynb
+
+### Phase 7 — GitHub Push ✅
+- [x] Push to GitHub
+- [x] Run `python main.py` with real yfinance data
+- [x] Validate outputs with real data
+- [ ] Screenshot dashboard for README
+
+---
+
+## 4. Metrics used and PE rationale
+
+| Metric | Formula | Why PE cares | Higher = Better |
+|---|---|---|---|
+| EBITDA Margin | EBITDA / Revenue | Core profitability proxy | ✅ |
+| ROIC | NOPAT / Invested Capital | Capital efficiency | ✅ |
+| FCF Conversion | FCF / EBITDA | Cash quality | ✅ |
+| Net Debt / EBITDA | (Debt - Cash) / EBITDA | Leverage headroom | ❌ |
+| Interest Coverage | EBIT / Interest Expense | Debt service capacity | ✅ |
+| EV / EBITDA | EV / EBITDA | Entry valuation | ❌ |
+| Revenue Growth | YoY % | Growth trajectory | ✅ |
+| OCF Margin | Operating CF / Revenue | Cash profitability | ✅ |
+
+---
+
+## 5. Scoring model
+
+Weights defined in `config.yaml`. Default:
+
+| Metric | Weight |
+|---|---|
+| EBITDA Margin | 15% |
+| ROIC | 10% |
+| FCF Conversion | 15% |
+| OCF Margin | 10% |
+| Net Debt / EBITDA | 10% |
+| Interest Coverage | 10% |
+| Revenue Growth | 10% |
+| EBITDA Growth | 5% |
+| EV / EBITDA | 15% |
+
+Method: percentile rank per metric (0→100), invert where lower = better, then weighted sum.
+
+---
+
+## 6. Debt Capacity Classification
+
+| Label | Criteria |
+|---|---|
+| High | EBITDA margin > 20% AND FCF conversion > 70% AND Net Debt/EBITDA < 2.5x AND Interest Coverage > 5x |
+| Medium | Intermediate profile |
+| Low | EBITDA margin < 10% OR Net Debt/EBITDA > 4x OR Interest Coverage < 2.5x |
+
+---
+
+## 7. Session Journal
+
+### Session 1 — Project initialization
+**Date:** 2026-03-24  
+**What was done:**
+- Defined full project scope and architecture
+- Decided on yfinance as data source (real public data, free, GitHub-friendly)
+- Created full repo directory structure
+- Created claude.md (this file)
+- Created README.md skeleton
+
+**Key decisions:**
+- Option 3 (Streamlit dashboard) as final target
+- Percentile ranking for scoring (more robust than min-max)
+- Real data via yfinance over fictive dataset
+- All config externalised in YAML
+
+**Next session:**
+- Write config.yaml
+- Write requirements.txt
+- Build universe ticker list
+- Write loader.py
+
+---
+
+### Session 2 — Full pipeline build + test validation
+**Date:** 2026-03-24  
+**What was done:**
+- Wrote all 8 screener modules (loader, cleaner, ratios, scoring, classifier, ranking, exporter, summary)
+- Wrote main.py orchestrator with CLI args (`--no-fetch`, `--top`, `--config`)
+- Wrote full Streamlit dashboard (streamlit_app.py) with:
+  - KPI cards, top-N table, histogram, pie chart, bubble chart
+  - Company drill-down with radar sub-score chart
+  - Adjustable weight sliders, sector/debt capacity filters
+  - CSV download button
+- Wrote 14 unit tests across ratios, scoring, cleaner, classifier
+- All 14 tests passing ✅ (validated without network access)
+- Created exploratory_analysis.ipynb with 6 analysis sections
+- Added .gitignore
+- Network disabled in this environment — yfinance fetch will work locally
+
+**Key decisions:**
+- `_safe_divide()` utility in ratios.py handles all zero/NaN cases centrally
+- Scoring fills NaN metric scores with 50 (neutral) — avoids penalizing companies with missing data
+- Debt capacity uses "2 of 3 low triggers" logic — single bad metric doesn't disqualify
+- Streamlit re-runs full pipeline on weight/filter change (fast enough at 100 companies)
+- `.gitignore` excludes `data/raw/`, `data/processed/`, `outputs/` — users run the pipeline themselves
+
+**Issues encountered & fixed:**
+- yfinance `interest_expense` can return negative values → added `.abs()` in `compute_interest_coverage`
+- yfinance `capex` is negative by convention → added `abs()` in loader and ratios
+- `_safe_get` must handle both missing index keys and `pd.isna` separately
+
+**Next session:**
+- Push to GitHub
+- Run `python main.py` locally with real yfinance data
+- Validate that real data flows cleanly through pipeline
+- Add screenshot of Streamlit dashboard to README
+
+*Last updated: 2026-03-24 — Session 2*
+
+---
+
+### Session 3 — Pipeline validation + first commit
+**Date:** 2026-03-24
+**What was done:**
+- Created missing runtime directories: `data/raw/`, `data/processed/`, `outputs/`
+- Installed all requirements via `pip3 install -r requirements.txt`
+- Ran `pytest tests/ -v` → 13/13 tests passing ✅
+- Fixed Python 3.9 incompatibility in `classifier.py`: `bool | None` return type annotation (union syntax requires 3.10+) → removed annotation, logic unchanged
+- Ran `python main.py` with live yfinance data:
+  - 80/90 tickers fetched successfully (10 skipped — no income statement data)
+  - 78 companies scored after eligibility filter
+  - Debt capacity breakdown: High: 8 | Medium: 64 | Low: 6
+  - Red flags detected in 33 companies
+  - Outputs written: `top_targets.csv`, `companies_scored.csv`, `screening_summary.xlsx`
+- Launched Streamlit dashboard → confirmed live at http://localhost:8501
+- Initialized git repo and made first commit
+
+**Top 5 PE Targets (real data, 2026-03-24):**
+| Rank | Company | Sector | PE Score | Debt Capacity |
+|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 88.7 | Medium |
+| 2 | Stride Inc | Specialty | 77.2 | High |
+| 3 | Graco Inc | Industrials | 73.1 | High |
+| 4 | Copart Inc | Business Services | 71.9 | Medium |
+| 5 | Microsoft Corp | Technology | 71.2 | Medium |
+
+**Issues encountered & fixed:**
+- `bool | None` union type annotation in `classifier.py:109` not supported on Python 3.9 → removed return type annotation
+
+**Next session:**
+- Take Streamlit dashboard screenshot for README
+- Push to GitHub (`git push origin main`)
+
+*Last updated: 2026-03-24 — Session 3*

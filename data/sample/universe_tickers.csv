@@ -1,0 +1,100 @@
+ticker,company,sector,country
+# Industrials
+MMM,3M Company,Industrials,US
+AME,AMETEK Inc,Industrials,US
+ROK,Rockwell Automation,Industrials,US
+ITW,Illinois Tool Works,Industrials,US
+GGG,Graco Inc,Industrials,US
+ROP,Roper Technologies,Industrials,US
+GNRC,Generac Holdings,Industrials,US
+TTC,Toro Company,Industrials,US
+MIDD,Middleby Corp,Industrials,US
+AIXI,Xponential Fitness,Industrials,US
+# Healthcare
+ABT,Abbott Laboratories,Healthcare,US
+BDX,Becton Dickinson,Healthcare,US
+EW,Edwards Lifesciences,Healthcare,US
+ISRG,Intuitive Surgical,Healthcare,US
+STE,Steris PLC,Healthcare,US
+WST,West Pharmaceutical,Healthcare,US
+TECH,Bio-Techne Corp,Healthcare,US
+HOLX,Hologic Inc,Healthcare,US
+ALGN,Align Technology,Healthcare,US
+MMSI,Merit Medical Systems,Healthcare,US
+# Technology (non-hypergrowth, cash generative)
+MSFT,Microsoft Corp,Technology,US
+ORCL,Oracle Corp,Technology,US
+CTSH,Cognizant Technology,Technology,US
+EPAM,EPAM Systems,Technology,US
+LDOS,Leidos Holdings,Technology,US
+SAIC,Science Applications,Technology,US
+MANH,Manhattan Associates,Technology,US
+CDAY,Ceridian HCM,Technology,US
+TYL,Tyler Technologies,Technology,US
+PRFT,Perficient Inc,Technology,US
+# Consumer Staples
+PG,Procter & Gamble,Consumer Staples,US
+CL,Colgate-Palmolive,Consumer Staples,US
+CHD,Church & Dwight,Consumer Staples,US
+HRL,Hormel Foods,Consumer Staples,US
+MKC,McCormick & Co,Consumer Staples,US
+SJM,J.M. Smucker,Consumer Staples,US
+LANC,Lancaster Colony,Consumer Staples,US
+CALM,Cal-Maine Foods,Consumer Staples,US
+FRPT,Freshpet Inc,Consumer Staples,US
+KVUE,Kenvue Inc,Consumer Staples,US
+# Business Services
+CSGP,CoStar Group,Business Services,US
+VRSK,Verisk Analytics,Business Services,US
+BR,Broadridge Financial,Business Services,US
+JKHY,Jack Henry Associates,Business Services,US
+CACI,CACI International,Business Services,US
+EXLS,ExlService Holdings,Business Services,US
+WEX,WEX Inc,Business Services,US
+CPRT,Copart Inc,Business Services,US
+CBRE,CBRE Group,Business Services,US
+INFO,Informa PLC,Business Services,UK
+# Packaging & Materials
+BALL,Ball Corporation,Packaging,US
+SEE,Sealed Air Corp,Packaging,US
+SLGN,Silgan Holdings,Packaging,US
+GPK,Graphic Packaging,Packaging,US
+BERY,Berry Global Group,Packaging,US
+ATR,AptarGroup,Packaging,US
+PTVE,Pactiv Evergreen,Packaging,US
+SON,Sonoco Products,Packaging,US
+OI,O-I Glass,Packaging,US
+STGW,Stagwell Inc,Packaging,US
+# Infrastructure & Engineering
+WSC,WillScot Mobile Mini,Infrastructure,US
+ROAD,Construction Partners,Infrastructure,US
+PRIM,Primoris Services,Infrastructure,US
+MYRG,MYR Group,Infrastructure,US
+IESC,IES Holdings,Infrastructure,US
+WLDN,Willdan Group,Infrastructure,US
+NVEE,NV5 Global,Infrastructure,US
+EXPO,Exponent Inc,Infrastructure,US
+TRU,TransUnion,Infrastructure,US
+HURN,Huron Consulting,Infrastructure,US
+# Energy (midstream / services, not E&P)
+PSX,Phillips 66,Energy,US
+VLO,Valero Energy,Energy,US
+MPC,Marathon Petroleum,Energy,US
+TRGP,Targa Resources,Energy,US
+DT,Dynatrace Inc,Energy,US
+WTTR,Select Water Solutions,Energy,US
+NGL,NGL Energy Partners,Energy,US
+CIVI,Civitas Resources,Energy,US
+DINO,HF Sinclair,Energy,US
+PARR,Par Pacific Holdings,Energy,US
+# Specialty / Niche (PE favorites)
+RBA,RB Global Inc,Specialty,US
+KAR,OPENLANE Inc,Specialty,US
+ARMK,Aramark Holdings,Specialty,US
+ABM,ABM Industries,Specialty,US
+BFAM,Bright Horizons,Specialty,US
+LRN,Stride Inc,Specialty,US
+STRA,Strategic Education,Specialty,US
+PRSC,The Providence Service,Specialty,US
+MODV,ModivCare Inc,Specialty,US
+ADUS,Addus HomeCare,Specialty,US

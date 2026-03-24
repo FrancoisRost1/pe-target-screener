@@ -1,0 +1,87 @@
+# config.yaml — PE Target Screener
+# All scoring weights, classification thresholds, and assumptions.
+# Modify here — no code changes needed.
+
+# -------------------------------------------------------------------
+# Scoring weights (must sum to 1.0)
+# -------------------------------------------------------------------
+weights:
+  ebitda_margin: 0.15       # Profitability
+  roic: 0.10                # Capital efficiency
+  fcf_conversion: 0.15      # Cash quality
+  ocf_margin: 0.10          # Cash profitability
+  net_debt_to_ebitda: 0.10  # Leverage headroom (lower = better)
+  interest_coverage: 0.10   # Debt service capacity
+  revenue_growth: 0.10      # Growth trajectory
+  ebitda_growth: 0.05       # Earnings momentum
+  ev_to_ebitda: 0.15        # Entry valuation attractiveness (lower = better)
+
+# -------------------------------------------------------------------
+# Metrics where LOWER value = BETTER (ranking will be inverted)
+# -------------------------------------------------------------------
+invert_metrics:
+  - net_debt_to_ebitda
+  - ev_to_ebitda
+
+# -------------------------------------------------------------------
+# Debt capacity classification thresholds
+# -------------------------------------------------------------------
+debt_capacity:
+  high:
+    min_ebitda_margin: 0.20       # > 20%
+    min_fcf_conversion: 0.70      # > 70%
+    max_net_debt_to_ebitda: 2.5   # < 2.5x
+    min_interest_coverage: 5.0    # > 5x
+  low:
+    max_ebitda_margin: 0.10       # < 10%
+    max_net_debt_to_ebitda: 4.0   # > 4x
+    max_interest_coverage: 2.5    # < 2.5x
+
+# -------------------------------------------------------------------
+# Red flag thresholds
+# -------------------------------------------------------------------
+red_flags:
+  max_interest_coverage: 2.0      # Below this = flag
+  max_net_debt_to_ebitda: 5.0     # Above this = flag
+  min_fcf_conversion: 0.30        # Below this = flag
+  min_revenue_growth: -0.05       # Below this = flag (negative growth)
+  max_ev_to_ebitda: 20.0          # Above this = flag (too expensive)
+  max_capex_to_revenue: 0.15      # Above this = flag (capex heavy)
+
+# -------------------------------------------------------------------
+# Eligibility filters (applied before scoring)
+# Applied when filter_ineligible: true in main.py
+# -------------------------------------------------------------------
+eligibility:
+  min_revenue: 100_000_000        # $100M minimum revenue
+  min_ebitda: 10_000_000          # $10M minimum EBITDA
+  min_ebitda_margin: 0.05         # 5% minimum EBITDA margin
+  min_interest_coverage: 1.5      # Must be able to service existing debt
+  exclude_sectors:
+    - Financials
+    - Real Estate
+    - Utilities                   # Capital-heavy, different valuation logic
+
+# -------------------------------------------------------------------
+# Financial assumptions
+# -------------------------------------------------------------------
+assumptions:
+  tax_rate: 0.25                  # 25% effective tax rate for NOPAT
+  min_invested_capital: 1         # Avoid division by zero in ROIC
+
+# -------------------------------------------------------------------
+# Output settings
+# -------------------------------------------------------------------
+output:
+  top_n: 20                       # Number of top candidates to highlight
+  export_csv: true
+  export_excel: true
+  output_dir: outputs/
+
+# -------------------------------------------------------------------
+# Data source
+# -------------------------------------------------------------------
+data:
+  universe_file: data/sample/universe_tickers.csv
+  raw_output: data/raw/companies_raw.csv
+  processed_output: data/processed/companies_scored.csv
