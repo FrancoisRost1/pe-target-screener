@@ -15,10 +15,11 @@ DISPLAY_COLS = [
     "net_debt_to_ebitda", "interest_coverage",
     "ev_to_ebitda", "revenue_growth",
     "irr_proxy", "irr_base", "irr_upside", "irr_downside",
+    "irr_driver_growth", "irr_driver_deleveraging", "irr_driver_multiple",
     "max_debt", "equity_required", "fcf_yield_equity",
     "debt_capacity", "red_flags",
     "quality_score", "cash_score", "leverage_score", "valuation_score",
-    "pe_score", "pe_score_raw", "pe_score_adjusted",
+    "pe_score", "pe_score_raw", "pe_score_adjusted", "irr_score", "pe_score_final",
     "red_flag_penalty", "valuation_penalty", "deal_killer_penalty",
 ]
 
@@ -33,7 +34,11 @@ def rank_companies(df: pd.DataFrame) -> pd.DataFrame:
     don't appear at the top of the shortlist.
     """
     df = df.copy()
-    sort_col = "pe_score_adjusted" if "pe_score_adjusted" in df.columns else "pe_score"
+    sort_col = (
+        "pe_score_final" if "pe_score_final" in df.columns else
+        "pe_score_adjusted" if "pe_score_adjusted" in df.columns else
+        "pe_score"
+    )
     df = df.sort_values(sort_col, ascending=False, na_position="last")
     df["rank"] = range(1, len(df) + 1)
     logger.info(f"Ranked {len(df)} companies by {sort_col}")

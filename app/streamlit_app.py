@@ -222,8 +222,12 @@ def main():
             st.exception(e)
             return
 
-    # Apply filters against pe_score_adjusted
-    score_col = "pe_score_adjusted" if "pe_score_adjusted" in df.columns else "pe_score"
+    # Apply filters against pe_score_final (IRR-blended), fallback to pe_score_adjusted
+    score_col = (
+        "pe_score_final" if "pe_score_final" in df.columns else
+        "pe_score_adjusted" if "pe_score_adjusted" in df.columns else
+        "pe_score"
+    )
     mask = pd.Series([True] * len(df), index=df.index)
     if filters["min_score"] > 0:
         mask &= df[score_col].fillna(0) >= filters["min_score"]
@@ -243,15 +247,29 @@ def main():
     c1.metric("Companies Screened", len(df))
     c2.metric("After Filters", len(df_filtered))
     c3.metric(
-        "Avg Adjusted Score",
+        "Avg Final Score",
         f"{df_filtered[score_col].mean():.1f}" if len(df_filtered) else "—",
     )
     c4.metric("High Debt Capacity", int((df_filtered["debt_capacity"] == "High").sum()))
-    irr_median = df_filtered["irr_proxy"].median() if "irr_proxy" in df_filtered.columns else None
+    irr_col_name = "irr_base" if "irr_base" in df_filtered.columns else "irr_proxy"
+    irr_median = df_filtered[irr_col_name].median() if irr_col_name in df_filtered.columns else None
     c5.metric(
-        "Median IRR Proxy",
+        "Median IRR (Base)",
         fmt_irr(irr_median) if irr_median is not None and not np.isnan(irr_median) else "—",
     )
+
+    # Market context alert — shown when median IRR is below typical PE hurdle
+    lbo_cfg = run_cfg.get("lbo", {})
+    if irr_median is not None and not np.isnan(irr_median) and irr_median < 0.12:
+        st.info(
+            f"ℹ️ **Market context:** Under current assumptions "
+            f"({int(lbo_cfg.get('holding_period', 5))}yr hold, "
+            f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit, "
+            f"{lbo_cfg.get('target_leverage', 4.0):.1f}x leverage), "
+            f"most public comps do not meet typical PE return thresholds (20%+ IRR). "
+            f"Median base IRR across screened universe: {fmt_irr(irr_median)}. "
+            f"Adjust LBO assumptions in the sidebar to stress-test scenarios."
+        )
 
     # ── Top Targets Table ─────────────────────────────────────────────────────
     st.markdown("---")
@@ -260,7 +278,7 @@ def main():
     TABLE_COLS = [
         "rank", "ticker", "company", "sector",
         "ebitda_margin", "fcf_conversion", "net_debt_to_ebitda",
-        "ev_to_ebitda", "irr_base", "irr_downside", "debt_capacity", "pe_score_adjusted",
+        "ev_to_ebitda", "irr_base", "irr_downside", "debt_capacity", "pe_score_final",
     ]
     display_df = df_top[[c for c in TABLE_COLS if c in df_top.columns]].copy()
 
@@ -273,8 +291,8 @@ def main():
     for col in ["irr_base", "irr_downside"]:
         if col in display_df.columns:
             display_df[col] = display_df[col].apply(fmt_irr)
-    if "pe_score_adjusted" in display_df.columns:
-        display_df["pe_score_adjusted"] = display_df["pe_score_adjusted"].apply(fmt_score)
+    if "pe_score_final" in display_df.columns:
+        display_df["pe_score_final"] = display_df["pe_score_final"].apply(fmt_score)
     if "debt_capacity" in display_df.columns:
         display_df["debt_capacity"] = display_df["debt_capacity"].apply(
             lambda v: f"{debt_capacity_color(v)} {v}"
@@ -283,10 +301,10 @@ def main():
     col_rename = {c: c.replace("_", " ").title() for c in display_df.columns}
     col_rename["irr_base"] = "IRR (Base)"
     col_rename["irr_downside"] = "IRR (Down)"
+    col_rename["pe_score_final"] = "Final Score"
     display_df.rename(columns=col_rename, inplace=True)
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-    lbo_cfg = run_cfg.get("lbo", {})
     st.caption(
         f"IRR (Base): {int(lbo_cfg.get('holding_period', 5))}yr hold, "
         f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit cap. "
@@ -512,9 +530,9 @@ def _show_company_detail(row: pd.Series, cfg: dict):
         st.markdown(f"### {row.get('company', row.get('ticker'))}")
         st.caption(f"**Sector:** {row.get('sector', '—')}  |  **Rank:** #{int(row.get('rank', 0))}")
 
-        # Row 1: adjusted score + core metrics
+        # Row 1: final score + core metrics
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Adj. Score", fmt_score(row.get("pe_score_adjusted", row.get("pe_score"))))
+        m1.metric("Final Score", fmt_score(row.get("pe_score_final", row.get("pe_score_adjusted", row.get("pe_score")))))
         m2.metric("EBITDA Margin", fmt_pct(row.get("ebitda_margin")))
         m3.metric("FCF Conversion", fmt_pct(row.get("fcf_conversion")))
         m4.metric("EV/EBITDA", fmt_mult(row.get("ev_to_ebitda")))
@@ -526,12 +544,16 @@ def _show_company_detail(row: pd.Series, cfg: dict):
         m7.metric("Equity Required", fmt_millions(row.get("equity_required")))
         m8.metric("FCF Yield / Equity", fmt_fcf_yield_equity(row.get("fcf_yield_equity")))
 
-        # Raw score for comparison
+        # Score decomposition caption
         raw = row.get("pe_score_raw", row.get("pe_score"))
         adj = row.get("pe_score_adjusted")
-        if raw is not None and adj is not None and not pd.isna(raw) and not pd.isna(adj):
-            st.caption(f"Raw Score (universe-only): {raw:.1f} → Adjusted: {adj:.1f} "
-                       f"(Δ {adj - raw:+.1f})")
+        final = row.get("pe_score_final")
+        if raw is not None and adj is not None and final is not None \
+                and not pd.isna(raw) and not pd.isna(adj) and not pd.isna(final):
+            st.caption(
+                f"Raw: {raw:.1f} → Adj: {adj:.1f} → Final (IRR-blended): {final:.1f} "
+                f"(Δ {final - raw:+.1f} vs raw)"
+            )
 
         # LBO Deal Breakdown expander
         lbo_cfg = cfg.get("lbo", {})
@@ -647,6 +669,48 @@ def _show_company_detail(row: pd.Series, cfg: dict):
                         bargap=0.3,
                     )
                     st.plotly_chart(fig_irr, use_container_width=True)
+
+                # IRR Bridge — value driver decomposition
+                growth_drv = row.get("irr_driver_growth")
+                delev_drv = row.get("irr_driver_deleveraging")
+                mult_drv = row.get("irr_driver_multiple")
+
+                drivers_valid = all(
+                    v is not None and not pd.isna(v)
+                    for v in [growth_drv, delev_drv, mult_drv]
+                )
+                if drivers_valid and any(abs(v) > 0.001 for v in [growth_drv, delev_drv, mult_drv]):
+                    st.markdown("**🔑 IRR Bridge — Value Drivers**")
+                    driver_labels = ["EBITDA Growth", "Deleveraging", "Multiple Δ"]
+                    driver_vals = [growth_drv * 100, delev_drv * 100, mult_drv * 100]
+                    driver_colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in driver_vals]
+
+                    fig_bridge = go.Figure()
+                    fig_bridge.add_trace(go.Bar(
+                        x=driver_labels,
+                        y=driver_vals,
+                        marker_color=driver_colors,
+                        text=[f"{v:+.1f}%" for v in driver_vals],
+                        textposition="outside",
+                        showlegend=False,
+                    ))
+                    fig_bridge.add_hline(
+                        y=0, line_dash="solid",
+                        line_color="rgba(200,200,200,0.5)", line_width=1,
+                    )
+                    y_abs_max = max(abs(v) for v in driver_vals) * 1.4 or 5
+                    fig_bridge.update_layout(
+                        height=220,
+                        margin=dict(t=30, b=10, l=10, r=10),
+                        yaxis=dict(title="IRR contribution (%)",
+                                   range=[-y_abs_max, y_abs_max]),
+                        xaxis=dict(title=""),
+                        title=dict(
+                            text=f"IRR = {fmt_irr(irr_base_val)} | Value Driver Attribution",
+                            font=dict(size=12),
+                        ),
+                    )
+                    st.plotly_chart(fig_bridge, use_container_width=True)
 
         # Investment memo with proper line breaks
         memo = row.get("investment_memo", "")

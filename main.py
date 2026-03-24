@@ -96,19 +96,22 @@ def run(cfg: dict, fetch: bool = True, top_n: int = None):
 def _print_summary(top, n):
     console.print(f"\n[bold]Top {n} PE Targets[/bold]")
     table = Table(show_header=True, header_style="bold magenta")
-    for col in ["rank", "company", "sector", "pe_score_adjusted", "irr_proxy", "debt_capacity"]:
+    cols_to_show = ["rank", "company", "sector", "pe_score_final", "irr_base", "irr_downside", "irr_upside", "debt_capacity"]
+    for col in cols_to_show:
         if col in top.columns:
             table.add_column(col.replace("_", " ").title())
     for _, row in top.head(10).iterrows():
-        irr = row.get("irr_proxy")
-        irr_str = f"{irr:.1%}" if irr is not None and irr == irr else "N/A"
-        adj = row.get("pe_score_adjusted", row.get("pe_score", 0))
+        def _fmt_irr(v):
+            return f"{v:.1%}" if v is not None and v == v else "N/A"
+        final = row.get("pe_score_final", row.get("pe_score_adjusted", row.get("pe_score", 0)))
         table.add_row(
             str(int(row.get("rank", 0))),
             str(row.get("company", "")),
             str(row.get("sector", "")),
-            f"{adj:.1f}",
-            irr_str,
+            f"{final:.1f}",
+            _fmt_irr(row.get("irr_base")),
+            _fmt_irr(row.get("irr_downside")),
+            _fmt_irr(row.get("irr_upside")),
             str(row.get("debt_capacity", "")),
         )
     console.print(table)

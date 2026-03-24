@@ -198,6 +198,41 @@ def apply_score_adjustments(df: pd.DataFrame) -> pd.DataFrame:
     # Step 2: deal killer — modifies pe_score_adjusted in place, adds deal_killer_penalty
     df = apply_deal_killer_penalty(df)
 
+    # Step 3: blend quality score with IRR signal for return-first ranking
+    df = compute_irr_blended_score(df)
+
+    return df
+
+
+def compute_irr_blended_score(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Blend the penalty-adjusted quality score with IRR signal for a return-first ranking.
+
+    PE context: Return potential should drive ranking, not just business quality.
+    A mediocre business at a cheap price (high IRR) beats a great business at a full
+    price (low IRR) for LBO purposes. The blended score weights IRR at 40%, ensuring
+    companies that don't pencil financially cannot rank above those that do.
+
+    Formula:
+      irr_score   = percentile rank of irr_base (0–100), neutral (50) for NaN
+      pe_score_final = 0.60 × pe_score_adjusted + 0.40 × irr_score
+
+    pe_score_adjusted already incorporates deal killer penalties (halve/zero for
+    negative IRR), so pe_score_final double-penalizes broken deals — intentionally.
+    """
+    if "irr_base" not in df.columns:
+        df["irr_score"] = np.nan
+        df["pe_score_final"] = df["pe_score_adjusted"]
+        return df
+
+    irr_ranked = df["irr_base"].rank(method="average", na_option="keep", pct=True) * 100
+    df["irr_score"] = irr_ranked.fillna(50)
+
+    df["pe_score_final"] = (
+        0.60 * df["pe_score_adjusted"].fillna(50) +
+        0.40 * df["irr_score"]
+    ).clip(0, 100).round(2)
+
     return df
 
 

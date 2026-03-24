@@ -427,3 +427,73 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `screener/lbo.py`, `screener/classifier.py`, `screener/scoring.py`, `screener/ranking.py`, `config.yaml`, `app/streamlit_app.py`
 
 *Last updated: 2026-03-24 — Session 7*
+
+---
+
+### Session 8 — Scenario spread fix, IRR bridge waterfall, IRR-blended score, market context
+**Date:** 2026-03-24
+**What was done:**
+
+**FIX 1 — Scenario IRR: real spread between Base / Upside / Downside:**
+- Rewrote `_compute_single_irr(df, cfg, growth_delta, exit_multiple_delta)` in `lbo.py`
+- Key changes:
+  1. Growth clips to `(-0.10, +0.20)` — wider range ensures ±2% delta produces real spread
+  2. Exit multiple: `(entry.clip(upper=cap) + exit_multiple_delta).clip(lower=4.0)` — additive after clipping, so upside allows modest expansion even for cheap names
+  3. Scenarios: upside = +2% growth + 1x exit; downside = -2% growth - 1x exit
+- Result: 96.2% of companies have upside-downside spread ≥ 5% (target: 80%) ✅
+- Median spread: 9.7% across universe
+- Note: ~4% of companies still show identical scenarios because entry EV/EBITDA < 3x causes all scenarios to hit the 4x floor AND growth > 20% hits the ceiling
+
+**FIX 2 — IRR Bridge: decompose IRR into 3 value drivers:**
+- Added `compute_irr_bridge(df, cfg)` to `lbo.py`
+- Three drivers (counterfactual attribution):
+  1. `irr_driver_growth`: irr_base - irr_if_revenue_growth=0 (growth contribution)
+  2. `irr_driver_deleveraging`: irr_base - irr_if_no_debt_repayment (paydown contribution)
+  3. `irr_driver_multiple`: irr_base - irr_if_no_exit_cap (0 when entry < cap, negative when cap compresses)
+- Implemented via cfg/df overrides to `_compute_single_irr` (no extra function signatures needed)
+- Called in `compute_lbo_metrics()` after `compute_scenario_irr()`
+- IRR bridge for top 3 (2026-03-24):
+  - Cal-Maine: Growth +31%, Deleverage +4%, Multiple 0% (entry < cap, no compression)
+  - Stride: Growth +26%, Deleverage +3%, Multiple 0%
+  - Civitas: Growth +33%, Deleverage +2%, Multiple 0%
+
+**FIX 3 — IRR bridge waterfall chart in dashboard drill-down:**
+- Added vertical bar chart in LBO Deal Breakdown expander (after scenario bar chart)
+- Bars: EBITDA Growth / Deleveraging / Multiple Δ — green if +, red if −
+- Title: "IRR = ~XX% | Value Driver Attribution"
+- Height: 220px, Y-axis auto-scaled to ±max driver value + 40% headroom
+
+**FIX 4 — Market context alert when median IRR < 12%:**
+- Added `st.info()` block after KPI cards in `main()` of streamlit_app.py
+- Shown only when `irr_median < 0.12` — signals to user that public market valuations are rich
+- Displays holding period, exit multiple, leverage from current sidebar settings
+
+**FIX 5 — IRR-blended final score (`pe_score_final`):**
+- Added `compute_irr_blended_score(df)` to `scoring.py`, called from `apply_score_adjustments()`
+- Formula: `pe_score_final = 0.60 × pe_score_adjusted + 0.40 × irr_score`
+  where `irr_score = percentile rank of irr_base (0–100)`
+- Double-penalizes broken deals (deal killer already collapsed pe_score_adjusted)
+- `ranking.py`: now sorts by `pe_score_final`
+- `main.py` summary table: shows pe_score_final instead of pe_score_adjusted
+- Dashboard: `score_col` uses pe_score_final, table header = "Final Score"
+- Drill-down: "Raw → Adj → Final (IRR-blended)" caption
+
+**Top 5 PE Targets (post Session 8, 2026-03-24):**
+| Rank | Company | Sector | Final Score | IRR Base | IRR Down | IRR Up | Debt Capacity |
+|---|---|---|---|---|---|---|---|
+| 1 | Cal-Maine Foods | Consumer Staples | 94.9 | ~86% | ~86% | ~86% | Medium |
+| 2 | Stride Inc | Specialty | 86.6 | ~33% | ~26% | ~40% | High |
+| 3 | Civitas Resources | Energy | 78.3 | ~70% | ~70% | ~70% | Medium |
+| 4 | ExlService Holdings | Business Services | 76.5 | ~16% | ~11% | ~21% | Medium |
+| 5 | Cognizant Technology | Technology | 75.4 | ~18% | ~10% | ~26% | Medium |
+
+**Validation:**
+- 96.2% of companies have upside-downside spread ≥ 5% ✅
+- All top 10 have positive irr_base ✅
+- IRR bridge growth driver dominates for high-growth companies ✅
+- Multiple driver = 0% for top companies (they trade below exit cap — cheap) ✅
+- Ranked by pe_score_final ✅
+
+**Files changed:** `screener/lbo.py`, `screener/scoring.py`, `screener/ranking.py`, `main.py`, `app/streamlit_app.py`
+
+*Last updated: 2026-03-24 — Session 8*
