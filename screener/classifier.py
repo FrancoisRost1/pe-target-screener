@@ -17,16 +17,99 @@ logger = logging.getLogger(__name__)
 
 
 def classify_all(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Run debt capacity classification and red flag detection."""
+    """
+    Run debt capacity classification, red flag detection, and score penalties.
+
+    Order matters: penalties are applied after flags so both share the same
+    threshold definitions from config.
+    """
     df = df.copy()
     dc_cfg = cfg.get("debt_capacity", {})
     rf_cfg = cfg.get("red_flags", {})
 
     df["debt_capacity"] = df.apply(lambda row: _classify_debt_capacity(row, dc_cfg), axis=1)
     df["red_flags"] = df.apply(lambda row: _detect_red_flags(row, rf_cfg), axis=1)
+    df = compute_red_flag_penalty(df, cfg)
+    df = compute_valuation_penalty(df, cfg)
 
     logger.info(f"Debt capacity: {df['debt_capacity'].value_counts().to_dict()}")
     logger.info(f"Red flags found in {(df['red_flags'] != '').sum()} companies")
+    return df
+
+
+def compute_red_flag_penalty(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Assign a numeric score penalty per red flag triggered.
+
+    PE context: A high composite score should be discounted when the company
+    carries structural red flags. This penalty is subtracted from pe_score
+    in the adjustment step, ensuring flagged companies don't top the shortlist.
+
+    Penalties:
+      -10: Negative EBITDA (structural loss-maker)
+      -10: Interest coverage < 2.0x (can barely service existing debt)
+       -8: Net Debt/EBITDA > 5.0x (dangerously leveraged already)
+       -8: FCF conversion < 20% (poor cash generation)
+       -5: Revenue growth < -5% (declining business)
+       -5: EV/EBITDA > 20x (too expensive for LBO)
+       -5: CapEx/Revenue > 15% (capital intensive — hurts debt service)
+    """
+    df = df.copy()
+    rf = cfg.get("red_flags", {})
+    penalty = pd.Series(0.0, index=df.index)
+
+    if "ebitda" in df.columns:
+        penalty += df["ebitda"].fillna(0).lt(0) * -10
+
+    if "interest_coverage" in df.columns:
+        penalty += df["interest_coverage"].fillna(np.nan).lt(2.0).fillna(False) * -10
+
+    if "net_debt_to_ebitda" in df.columns:
+        penalty += df["net_debt_to_ebitda"].fillna(np.nan).gt(5.0).fillna(False) * -8
+
+    if "fcf_conversion" in df.columns:
+        penalty += df["fcf_conversion"].fillna(np.nan).lt(0.20).fillna(False) * -8
+
+    if "revenue_growth" in df.columns:
+        penalty += df["revenue_growth"].fillna(np.nan).lt(-0.05).fillna(False) * -5
+
+    if "ev_to_ebitda" in df.columns:
+        penalty += df["ev_to_ebitda"].fillna(np.nan).gt(20.0).fillna(False) * -5
+
+    if "capex_to_revenue" in df.columns:
+        penalty += df["capex_to_revenue"].fillna(np.nan).gt(0.15).fillna(False) * -5
+
+    df["red_flag_penalty"] = penalty
+    return df
+
+
+def compute_valuation_penalty(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Apply a tiered penalty for expensive valuations.
+
+    PE context: Valuation is the single biggest driver of IRR. Overpaying at
+    entry is the most common cause of PE deal failure. This penalty directly
+    discounts the score of richly-priced companies regardless of quality.
+
+    Tiers (EV/EBITDA):
+      > 18x  → -15 (deal almost certainly can't generate 20%+ IRR)
+      > 14x  → -8  (stretched — needs significant multiple expansion or growth)
+      > 12x  → -3  (slightly above LBO sweet spot)
+      ≤ 12x  → 0   (within LBO-friendly range)
+    """
+    df = df.copy()
+    penalty = pd.Series(0.0, index=df.index)
+
+    if "ev_to_ebitda" in df.columns:
+        ev = df["ev_to_ebitda"].fillna(np.nan)
+        penalty = np.where(ev > 18, -15,
+                  np.where(ev > 14, -8,
+                  np.where(ev > 12, -3, 0)))
+        penalty = pd.Series(penalty, index=df.index, dtype=float)
+        # NaN EV/EBITDA → no penalty (benefit of the doubt)
+        penalty[df["ev_to_ebitda"].isna()] = 0.0
+
+    df["valuation_penalty"] = penalty
     return df
 
 

@@ -71,6 +71,115 @@ def score_universe(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return df
 
 
+def score_universe_sector_adjusted(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Sector-adjusted scoring: blends universe-wide and within-sector percentile ranks.
+
+    Formula per metric:
+      universe_rank = percentile rank across all companies (0–100)
+      sector_rank   = percentile rank within the company's sector (0–100)
+      final_rank    = 0.6 × sector_rank + 0.4 × universe_rank
+
+    Rationale: A 20% EBITDA margin in Consumer Staples is exceptional.
+    The same margin in Technology is below-average. Sector-relative ranking
+    rewards companies that stand out within their peer group — which is how
+    PE deal teams actually evaluate opportunities.
+
+    Outputs:
+      pe_score_raw      — universe-only weighted score (preserved for reference)
+      pe_score          — sector-adjusted blended score (used for ranking)
+    """
+    df = df.copy()
+    weights = cfg.get("weights", {})
+    invert = cfg.get("invert_metrics", [])
+
+    has_sector = "sector" in df.columns and df["sector"].notna().any()
+    score_cols = []
+
+    for metric, weight in weights.items():
+        if metric not in df.columns:
+            logger.warning(f"Metric '{metric}' not found — skipping")
+            continue
+
+        series = df[metric]
+        score_col = f"score_{metric}"
+
+        # Universe-wide percentile rank
+        u_rank = series.rank(method="average", na_option="keep", pct=True) * 100
+
+        if has_sector:
+            # Within-sector percentile rank; fall back to universe rank for
+            # sectors with fewer than 3 companies (unstable percentiles)
+            s_rank = df.groupby("sector")[metric].rank(
+                method="average", na_option="keep", pct=True
+            ) * 100
+            sector_size = df.groupby("sector")["sector"].transform("count")
+            s_rank = s_rank.where(sector_size >= 3, u_rank)
+            blended = 0.6 * s_rank + 0.4 * u_rank
+        else:
+            blended = u_rank
+
+        if metric in invert:
+            u_rank = 100 - u_rank
+            blended = 100 - blended
+
+        df[score_col] = blended
+        score_cols.append((score_col, u_rank if metric in invert else
+                           series.rank(method="average", na_option="keep", pct=True) * 100,
+                           weight))
+
+    if not score_cols:
+        logger.error("No metrics could be scored")
+        df["pe_score_raw"] = np.nan
+        df["pe_score"] = np.nan
+        return df
+
+    total_weight = sum(w for _, _, w in score_cols)
+
+    # pe_score_raw: universe-only (for reference / comparison)
+    raw_scores = []
+    for score_col, u_rank_series, w in score_cols:
+        metric = score_col.replace("score_", "")
+        u_series = df[metric].rank(method="average", na_option="keep", pct=True) * 100
+        if metric in invert:
+            u_series = 100 - u_series
+        raw_scores.append((u_series, w))
+
+    df["pe_score_raw"] = sum(
+        s.fillna(50) * (w / total_weight) for s, w in raw_scores
+    ).round(2)
+
+    # pe_score: sector-adjusted blended
+    df["pe_score"] = sum(
+        df[col].fillna(50) * (w / total_weight) for col, _, w in score_cols
+    ).round(2)
+
+    logger.info(f"Sector-adjusted scoring: {df['pe_score'].notna().sum()} companies")
+    return df
+
+
+def apply_score_adjustments(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply red flag and valuation penalties to produce pe_score_adjusted.
+
+    pe_score_adjusted = pe_score + red_flag_penalty + valuation_penalty, clipped [0, 100]
+
+    PE context: A high raw score is necessary but not sufficient. A company
+    with strong margins but dangerous leverage or an astronomic valuation
+    deserves to be penalised before reaching a shortlist.
+    """
+    df = df.copy()
+    penalty_cols = []
+    if "red_flag_penalty" in df.columns:
+        penalty_cols.append(df["red_flag_penalty"].fillna(0))
+    if "valuation_penalty" in df.columns:
+        penalty_cols.append(df["valuation_penalty"].fillna(0))
+
+    total_penalty = sum(penalty_cols) if penalty_cols else 0
+    df["pe_score_adjusted"] = (df["pe_score"] + total_penalty).clip(0, 100).round(2)
+    return df
+
+
 def compute_sub_scores(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
     Compute 4 sub-scores for dashboard drill-down:

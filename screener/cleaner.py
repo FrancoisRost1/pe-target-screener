@@ -87,27 +87,99 @@ def _flag_data_quality(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def winsorize_ratios(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cap extreme ratio values before scoring to prevent outliers from distorting
+    percentile ranks. Winsorization is standard practice in quantitative screens.
+
+    PE context: A 2620x interest coverage is a data artifact, not alpha signal.
+    Capping at 50x preserves rank information while eliminating noise.
+    Negative EV/EBITDA is set to NaN — it is meaningless in an LBO context.
+    """
+    df = df.copy()
+
+    if "interest_coverage" in df.columns:
+        df["interest_coverage"] = df["interest_coverage"].clip(upper=50.0)
+
+    if "ev_to_ebitda" in df.columns:
+        # Negative EV/EBITDA = negative enterprise value or negative EBITDA.
+        # Neither is interpretable for buyout valuation purposes.
+        df.loc[df["ev_to_ebitda"] < 0, "ev_to_ebitda"] = np.nan
+
+    if "net_debt_to_ebitda" in df.columns:
+        df["net_debt_to_ebitda"] = df["net_debt_to_ebitda"].clip(-5.0, 15.0)
+
+    if "revenue_growth" in df.columns:
+        df["revenue_growth"] = df["revenue_growth"].clip(-0.5, 0.5)
+
+    if "ebitda_growth" in df.columns:
+        df["ebitda_growth"] = df["ebitda_growth"].clip(-0.5, 0.5)
+
+    if "fcf_conversion" in df.columns:
+        df["fcf_conversion"] = df["fcf_conversion"].clip(-0.5, 2.0)
+
+    if "roic" in df.columns:
+        df["roic"] = df["roic"].clip(-0.5, 1.0)
+
+    logger.info("Winsorization applied to ratio columns")
+    return df
+
+
 def apply_eligibility_filters(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
-    Apply pre-screening eligibility filters from config.
-    Removes companies that fail minimum criteria before scoring.
+    Apply pre-screening eligibility filters.
+    Two tiers:
+      1. Size filters (from config): minimum revenue and EBITDA in absolute terms.
+      2. Hard PE filters: non-negotiable quality gates applied after winsorization.
 
-    PE context: Funds typically have minimum size requirements and
-    won't look at businesses with structural deficiencies.
+    PE context: Funds have minimum size requirements and won't consider businesses
+    with structural deficiencies — negative EBITDA, insufficient interest coverage,
+    or margins too thin to absorb acquisition debt.
     """
     e = cfg.get("eligibility", {})
     before = len(df)
+
+    # ── Tier 1: size filters (config-driven) ──────────────────────────────────
     mask = pd.Series([True] * len(df), index=df.index)
 
     if "revenue" in df.columns and "min_revenue" in e:
-        mask &= df["revenue"].fillna(0) >= e["min_revenue"]
+        fails = df["revenue"].fillna(0) < e["min_revenue"]
+        if fails.sum():
+            logger.info(f"  Removed {fails.sum()} companies below min revenue")
+        mask &= ~fails
 
     if "ebitda" in df.columns and "min_ebitda" in e:
-        mask &= df["ebitda"].fillna(0) >= e["min_ebitda"]
+        fails = df["ebitda"].fillna(0) < e["min_ebitda"]
+        if fails.sum():
+            logger.info(f"  Removed {fails.sum()} companies below min EBITDA")
+        mask &= ~fails
 
     if "sector" in df.columns and "exclude_sectors" in e:
-        mask &= ~df["sector"].isin(e["exclude_sectors"])
+        fails = df["sector"].isin(e["exclude_sectors"])
+        if fails.sum():
+            logger.info(f"  Removed {fails.sum()} companies in excluded sectors")
+        mask &= ~fails
 
     df = df[mask].reset_index(drop=True)
-    logger.info(f"Eligibility filter: {before} → {len(df)} companies")
+
+    # ── Tier 2: hard PE filters (run after winsorization) ────────────────────
+    before_hard = len(df)
+
+    if "ebitda" in df.columns:
+        fails = df["ebitda"].fillna(0) <= 0
+        logger.info(f"  Hard filter: removed {fails.sum()} companies with EBITDA ≤ 0")
+        df = df[~fails].reset_index(drop=True)
+
+    if "ebitda_margin" in df.columns:
+        fails = df["ebitda_margin"].fillna(0) < 0.08
+        logger.info(f"  Hard filter: removed {fails.sum()} companies with EBITDA margin < 8%")
+        df = df[~fails].reset_index(drop=True)
+
+    if "interest_coverage" in df.columns:
+        fails = df["interest_coverage"].fillna(0) < 2.5
+        logger.info(f"  Hard filter: removed {fails.sum()} companies with interest coverage < 2.5x")
+        df = df[~fails].reset_index(drop=True)
+
+    logger.info(f"Eligibility filter: {before} → {len(df)} companies "
+                f"({before - before_hard} size, {before_hard - len(df)} hard PE filters)")
     return df

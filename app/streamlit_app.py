@@ -20,6 +20,7 @@ import yaml
 import plotly.graph_objects as go
 import plotly.express as px
 from pathlib import Path
+from typing import Tuple, Optional
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -83,7 +84,7 @@ def debt_capacity_color(val):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
-def sidebar(cfg: dict) -> tuple[pd.DataFrame | None, dict, dict]:
+def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict]:
     st.sidebar.title("⚙️ Screener Controls")
 
     # Data source

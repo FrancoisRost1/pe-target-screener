@@ -14,18 +14,28 @@ DISPLAY_COLS = [
     "ebitda_margin", "roic", "fcf_conversion",
     "net_debt_to_ebitda", "interest_coverage",
     "ev_to_ebitda", "revenue_growth",
+    "irr_proxy", "max_debt", "equity_required", "fcf_yield_equity",
     "debt_capacity", "red_flags",
     "quality_score", "cash_score", "leverage_score", "valuation_score",
-    "pe_score",
+    "pe_score", "pe_score_raw", "pe_score_adjusted",
+    "red_flag_penalty", "valuation_penalty",
 ]
 
 
 def rank_companies(df: pd.DataFrame) -> pd.DataFrame:
-    """Sort by pe_score descending and assign rank."""
+    """
+    Sort by pe_score_adjusted (penalty-adjusted score) descending.
+    Falls back to pe_score if pe_score_adjusted is not yet computed.
+
+    PE context: Ranking by adjusted score ensures that companies with
+    strong raw scores but serious red flags or expensive valuations
+    don't appear at the top of the shortlist.
+    """
     df = df.copy()
-    df = df.sort_values("pe_score", ascending=False, na_position="last")
+    sort_col = "pe_score_adjusted" if "pe_score_adjusted" in df.columns else "pe_score"
+    df = df.sort_values(sort_col, ascending=False, na_position="last")
     df["rank"] = range(1, len(df) + 1)
-    logger.info(f"Ranked {len(df)} companies")
+    logger.info(f"Ranked {len(df)} companies by {sort_col}")
     return df.reset_index(drop=True)
 
 

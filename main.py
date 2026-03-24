@@ -2,7 +2,7 @@
 main.py — Pipeline orchestrator
 
 Runs the full PE screening pipeline:
-load → clean → ratios → score → classify → rank → export
+load → clean → ratios → winsorize → lbo → eligibility → score → classify → rank → export
 
 Usage:
     python main.py
@@ -18,9 +18,10 @@ from rich.console import Console
 from rich.table import Table
 
 from screener.loader import load_universe, fetch_universe
-from screener.cleaner import clean, apply_eligibility_filters
+from screener.cleaner import clean, winsorize_ratios, apply_eligibility_filters
 from screener.ratios import compute_all_ratios
-from screener.scoring import score_universe, compute_sub_scores
+from screener.lbo import compute_lbo_metrics
+from screener.scoring import score_universe_sector_adjusted, compute_sub_scores, apply_score_adjustments
 from screener.classifier import classify_all
 from screener.ranking import rank_companies, get_top_n
 from screener.exporter import export_results
@@ -52,29 +53,40 @@ def run(cfg: dict, fetch: bool = True, top_n: int = None):
 
     console.print(f"[green]Loaded: {len(df)} companies[/green]")
 
-    # 2. Clean
+    # 2. Clean (type casting, dedup, quality flags)
     df = clean(df)
-    df = apply_eligibility_filters(df, cfg)
 
-    # 3. Ratios
+    # 3. Compute financial ratios
     df = compute_all_ratios(df, cfg)
 
-    # 4. Score
-    df = score_universe(df, cfg)
+    # 4. Winsorize (cap outliers BEFORE scoring and filters)
+    df = winsorize_ratios(df)
+
+    # 5. LBO return estimation (needs winsorized ratios)
+    df = compute_lbo_metrics(df, cfg)
+
+    # 6. Eligibility filters (size + hard PE quality gates, run after ratios)
+    df = apply_eligibility_filters(df, cfg)
+
+    # 7. Score — sector-adjusted percentile ranking
+    df = score_universe_sector_adjusted(df, cfg)
     df = compute_sub_scores(df, cfg)
 
-    # 5. Classify
+    # 8. Classify — debt capacity, red flags, score penalties
     df = classify_all(df, cfg)
 
-    # 6. Rank
+    # 9. Apply penalty adjustments to produce pe_score_adjusted
+    df = apply_score_adjustments(df)
+
+    # 10. Rank by pe_score_adjusted
     df = rank_companies(df)
     df = add_memos(df, top_n=top_n)
     top = get_top_n(df, n=top_n)
 
-    # 7. Export
+    # 11. Export
     export_results(df, top, cfg)
 
-    # 8. Display
+    # 12. Display
     _print_summary(top, top_n)
 
     console.print(f"\n[bold green]Done. Results saved to {cfg['output']['output_dir']}[/bold green]")
@@ -84,15 +96,19 @@ def run(cfg: dict, fetch: bool = True, top_n: int = None):
 def _print_summary(top, n):
     console.print(f"\n[bold]Top {n} PE Targets[/bold]")
     table = Table(show_header=True, header_style="bold magenta")
-    for col in ["rank", "company", "sector", "pe_score", "debt_capacity"]:
+    for col in ["rank", "company", "sector", "pe_score_adjusted", "irr_proxy", "debt_capacity"]:
         if col in top.columns:
             table.add_column(col.replace("_", " ").title())
     for _, row in top.head(10).iterrows():
+        irr = row.get("irr_proxy")
+        irr_str = f"{irr:.1%}" if irr is not None and irr == irr else "N/A"
+        adj = row.get("pe_score_adjusted", row.get("pe_score", 0))
         table.add_row(
             str(int(row.get("rank", 0))),
             str(row.get("company", "")),
             str(row.get("sector", "")),
-            f"{row.get('pe_score', 0):.1f}",
+            f"{adj:.1f}",
+            irr_str,
             str(row.get("debt_capacity", "")),
         )
     console.print(table)

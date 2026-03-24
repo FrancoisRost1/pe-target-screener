@@ -79,6 +79,15 @@ output:
   output_dir: outputs/
 
 # -------------------------------------------------------------------
+# LBO return estimation parameters
+# -------------------------------------------------------------------
+lbo:
+  target_leverage: 4.0          # EBITDA multiple for max debt capacity
+  holding_period: 5             # Years to exit
+  exit_multiple: 12.0           # EV/EBITDA at exit (conservative cap)
+  debt_repayment_rate: 0.4      # Fraction of cumulative FCF applied to debt repayment
+
+# -------------------------------------------------------------------
 # Data source
 # -------------------------------------------------------------------
 data:
