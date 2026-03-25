@@ -612,3 +612,50 @@ Method: percentile rank per metric (0→100), invert where lower = better, then 
 **Files changed:** `screener/lbo.py`, `screener/cleaner.py`, `screener/scoring.py`, `screener/summary.py`, `config.yaml`
 
 *Last updated: 2026-03-24 — Session 10*
+
+---
+
+### Session 11 — Codex bug fixes: interest double-count, 6x floor doc, LBO tests, comment fix
+**Date:** 2026-03-25
+**What was done:**
+
+**FIX 1 (HIGH) — Removed interest double-counting in _amortize_debt():**
+- `_amortize_debt()` in `lbo.py` was subtracting `debt × interest_rate` from FCF before the debt sweep, but `free_cash_flow` from yfinance is already post-interest (Operating CF - CapEx, where Operating CF is after existing debt service)
+- This caused double-counting: existing interest already deducted by yfinance + new LBO debt interest deducted again
+- Fix: removed the interest subtraction entirely. `debt_repayment_rate=0.40` means 40% of reported FCF sweeps principal; the retained 60% implicitly covers incremental interest on the new capital structure + taxes + working capital
+- Removed `interest_rate` parameter from `_amortize_debt()` signature and call site
+- Updated module docstring, function docstring, and config.yaml comment for `debt_interest_rate` (now "reference rate only — not applied separately")
+- IRRs now higher/more realistic (prior model was too conservative by double-charging interest)
+
+**FIX 2 (MEDIUM) — Strengthened 6x floor consistency documentation:**
+- The `ev_to_ebitda < 6x → NaN` in `cleaner.py` and the `clip(lower=6.0)` in `lbo.py _compute_single_irr()` serve different purposes (scoring neutrality vs IRR realism)
+- Added explicit 5-line comment block in `_compute_single_irr()` explaining exactly WHY raw ev/ebitda with 6x floor is used instead of the winsorized column, and how it relates to cleaner.py logic
+
+**FIX 3 (MEDIUM) — Added tests/test_lbo.py (13 new tests):**
+- `_amortize_debt`: 4 tests (correct reduction, no negative debt, partial paydown, zero FCF)
+- `compute_scenario_irr`: 4 tests (ordering, spread ≥ 4%, 40% cap, NaN for bad EV)
+- `apply_irr_hurdle_penalty`: 5 tests (negative IRR zeros score, sub-10% reduces, above unchanged, red flag added, no duplicate flags, mixed portfolio)
+- All 27 tests passing (14 existing + 13 new) ✅
+
+**FIX 4 (MINOR) — Fixed wrong comment at lbo.py (multiple driver section):**
+- Old: "Positive when entry > cap (cap helps = entry too rich)" — WRONG (cap compresses, it hurts)
+- New: "Negative when entry > cap: exit multiple is compressed → return drag"
+
+**Top 5 PE Targets (post Session 11, 2026-03-25):**
+| Rank | Company | Sector | Final Score | IRR Base | IRR Down | IRR Up | Debt Capacity |
+|------|---------|--------|-------------|----------|----------|--------|---------------|
+| 1 | Cal-Maine Foods | Consumer Staples | 90.8 | ~40% | ~40% | ~40% | Medium |
+| 2 | Stride Inc | Specialty | 86.8 | ~31% | ~22% | ~35% | High |
+| 3 | Cognizant Technology | Technology | 76.4 | ~17% | ~7% | ~21% | Medium |
+| 4 | Civitas Resources | Energy | 75.6 | ~40% | ~40% | ~40% | Medium |
+| 5 | Sonoco Products | Packaging | 72.8 | ~36% | ~30% | ~38% | Medium |
+
+**Validation:**
+- All 27 tests passing ✅
+- Pipeline runs cleanly (54 companies scored) ✅
+- No double interest charge — IRRs slightly higher vs Session 10 ✅
+- Wrong multiple driver comment corrected ✅
+
+**Files changed:** `screener/lbo.py`, `config.yaml`, `tests/test_lbo.py`
+
+*Last updated: 2026-03-25 — Session 11*

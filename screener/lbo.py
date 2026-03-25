@@ -11,8 +11,9 @@ Assumptions (all overridable via config.yaml lbo: section):
   target_leverage:     3.5x EBITDA (max debt, subject to 70% EV cap)
   holding_period:      5 years
   exit_multiple:       min(entry EV/EBITDA, cap) — never exit above cap without delta
-  debt_repayment_rate: 40% of post-interest FCF reduces debt each year
-  debt_interest_rate:  7% annual interest on outstanding debt (waterfall: interest first)
+  debt_repayment_rate: 40% of FCF swept to principal each year.
+    The 60% retained implicitly covers interest, incremental taxes, and working
+    capital — no separate interest subtraction. See _amortize_debt() for rationale.
 
 PE context: A screener without return estimation is incomplete.
 Even a rough IRR tells you whether a deal can work at current prices.
@@ -90,31 +91,32 @@ def compute_max_debt(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
 
 def _amortize_debt(max_debt: pd.Series, annual_fcf: pd.Series,
-                   debt_repayment_rate: float, holding_period: int,
-                   interest_rate: float = 0.0) -> pd.Series:
+                   debt_repayment_rate: float, holding_period: int) -> pd.Series:
     """
-    Simulate realistic annual debt amortization over the holding period.
+    Simulate annual debt amortization over the holding period.
 
-    Each year waterfall:
-      1. Compute interest cost on outstanding debt (debt × interest_rate)
-      2. FCF after interest = max(FCF - interest, 0)
-      3. Repay min(FCF_after_interest × rate, remaining_debt)
+    Each year: repay = min(FCF × debt_repayment_rate, remaining_debt)
+    Once debt hits zero, no further repayment — no negative debt possible.
 
-    Once debt hits zero, no further repayment — no negative debt.
+    Why no explicit interest subtraction:
+      yfinance free_cash_flow = Operating CF - CapEx, where Operating CF is
+      already net of the company's reported interest expense. A separate
+      interest charge on max_debt (the new LBO debt) would double-count this
+      cost, understating IRR. Instead, debt_repayment_rate = 0.40 means only
+      40% of reported FCF is swept to principal; the remaining 60% implicitly
+      covers incremental interest on the new capital structure, taxes, working
+      capital, and maintenance capex not captured in CapEx lines. This is
+      the standard simplification for a screener-level LBO model.
 
-    PE context: Interest is the first call on FCF — it must be paid before any
-    principal repayment. Without the interest waterfall, the model overstates
-    debt paydown speed. At 7% on $500M of debt = $35M/yr less available for
-    sweep. This materially affects the exit equity value, especially for
-    low-FCF businesses where interest consumes most of free cash flow.
+    PE context: Even at 40% sweep, a $500M debt load on $100M annual FCF
+    takes 5+ years to amortize — which is the point. The model shows realistic
+    debt remaining at exit without a separate interest parameter.
     """
     debt = max_debt.copy().fillna(0.0)
     fcf_clipped = annual_fcf.clip(lower=0)
 
     for _ in range(holding_period):
-        interest_cost = debt * interest_rate
-        fcf_after_interest = (fcf_clipped - interest_cost).clip(lower=0)
-        annual_repayment = (fcf_after_interest * debt_repayment_rate).clip(upper=debt)
+        annual_repayment = (fcf_clipped * debt_repayment_rate).clip(upper=debt)
         debt = (debt - annual_repayment).clip(lower=0)
 
     return debt
@@ -147,7 +149,6 @@ def _compute_single_irr(df: pd.DataFrame, cfg: dict,
     holding_period = lbo.get("holding_period", 5)
     exit_multiple_cap = lbo.get("exit_multiple", 8.0)
     debt_repayment_rate = lbo.get("debt_repayment_rate", 0.4)
-    interest_rate = lbo.get("debt_interest_rate", 0.07)
 
     required_cols = {"ebitda", "equity_required", "max_debt"}
     if not required_cols.issubset(df.columns):
@@ -158,10 +159,14 @@ def _compute_single_irr(df: pd.DataFrame, cfg: dict,
         else pd.Series(0.0, index=df.index)
     growth = (base_growth + growth_delta).clip(-0.10, 0.20)
 
-    # Entry multiple: compute from raw EV / EBITDA (bypasses NaN set by winsorization).
-    # The winsorized ev_to_ebitda column sets < 6x to NaN for scoring, but for IRR
-    # we must use the actual entry multiple floored at 6x — not fall back to the cap.
-    # Falling back to the 8x cap for a 5x entry company models free multiple expansion.
+    # Entry multiple: computed from raw EV / EBITDA (bypasses the winsorized column).
+    # cleaner.py winsorize_ratios() sets ev_to_ebitda < 6x → NaN for scoring (no signal).
+    # Here we intentionally use the raw ratio with a 6x floor, NOT the winsorized column:
+    #   - Using NaN here would fall back to exit_multiple_cap (8x), modelling free
+    #     multiple expansion for sub-6x entries — an IRR windfall that doesn't exist.
+    #   - Using the actual raw ratio (floored at 6x) anchors the entry cost correctly.
+    # Both modules treat 6x as the minimum meaningful LBO entry multiple; they differ
+    # only in treatment (NaN for scoring neutrality vs 6x floor for IRR realism).
     if "enterprise_value" in df.columns and "ebitda" in df.columns:
         raw_ev_ebitda = (
             df["enterprise_value"] / df["ebitda"].replace(0, np.nan)
@@ -190,10 +195,10 @@ def _compute_single_irr(df: pd.DataFrame, cfg: dict,
         else pd.Series(0.0, index=df.index)
     annual_fcf_stressed = annual_fcf * fcf_conversion_mult
 
-    # Annual debt amortization with interest waterfall (FIX 3)
+    # Annual debt amortization (40% FCF sweep; see _amortize_debt docstring)
     debt_remaining = _amortize_debt(
         df["max_debt"], annual_fcf_stressed, debt_repayment_rate,
-        holding_period, interest_rate
+        holding_period
     )
 
     exit_equity = exit_ev - debt_remaining
@@ -335,8 +340,8 @@ def compute_irr_bridge(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
     # --- Multiple driver: exit at cap vs exit at entry multiple ---
     # (zero growth, no deleverage, normal exit — cap applies)
-    # Positive when entry > cap (cap helps = entry too rich → not applicable for cheap names)
-    # Negative when cap < entry (cap hurts = compression); ~0 when entry <= cap
+    # Negative when entry > cap: exit multiple is compressed → return drag
+    # ~0 when entry <= cap: cap doesn't bind, no multiple effect (most cheap names here)
     irr_with_cap = _compute_single_irr(
         df_zero_growth, cfg_no_delev
     )
