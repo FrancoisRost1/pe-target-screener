@@ -18,6 +18,17 @@ weights:
   fcf_yield_ev: 0.05        # FCF yield on EV — real cash return vs price paid
 
 # -------------------------------------------------------------------
+# Scoring blend parameters
+# -------------------------------------------------------------------
+scoring:
+  sector_weight: 0.60            # Weight on sector-relative rank
+  universe_weight: 0.40          # Weight on universe-wide rank
+  irr_blend_quality: 0.60        # Weight on pe_score_adjusted in final score
+  irr_blend_irr: 0.40            # Weight on irr_score in final score
+  hurdle_penalty_mult: 0.40      # Multiplier for sub-hurdle IRR (60% reduction)
+  hurdle_rate: 0.10              # IRR below this triggers hurdle penalty
+
+# -------------------------------------------------------------------
 # Metrics where LOWER value = BETTER (ranking will be inverted)
 # -------------------------------------------------------------------
 invert_metrics:
@@ -39,7 +50,7 @@ debt_capacity:
     max_interest_coverage: 2.5    # < 2.5x
 
 # -------------------------------------------------------------------
-# Red flag thresholds
+# Red flag thresholds (used by both flag detection AND score penalties)
 # -------------------------------------------------------------------
 red_flags:
   max_interest_coverage: 2.0      # Below this = flag
@@ -48,6 +59,30 @@ red_flags:
   min_revenue_growth: -0.05       # Below this = flag (negative growth)
   max_ev_to_ebitda: 20.0          # Above this = flag (too expensive)
   max_capex_to_revenue: 0.15      # Above this = flag (capex heavy)
+
+# -------------------------------------------------------------------
+# Red flag penalty magnitudes (points subtracted per triggered flag)
+# -------------------------------------------------------------------
+red_flag_penalties:
+  negative_ebitda: -10            # Structural loss-maker
+  low_interest_coverage: -10      # Can barely service existing debt
+  high_leverage: -8               # Dangerously leveraged already
+  weak_fcf_conversion: -8         # Poor cash generation
+  negative_growth: -5             # Declining business
+  expensive_valuation: -5         # Too expensive for LBO
+  high_capex: -5                  # Capital intensive — hurts debt service
+
+# -------------------------------------------------------------------
+# Valuation penalty tiers (EV/EBITDA thresholds and point deductions)
+# -------------------------------------------------------------------
+valuation_penalties:
+  tiers:
+    - threshold: 18.0             # > 18x → deal almost certainly can't generate 20%+ IRR
+      penalty: -15
+    - threshold: 14.0             # > 14x → stretched — needs significant growth
+      penalty: -8
+    - threshold: 12.0             # > 12x → slightly above LBO sweet spot
+      penalty: -3
 
 # -------------------------------------------------------------------
 # Eligibility filters (applied before scoring)

@@ -5,12 +5,14 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from screener.scoring import score_universe
+from screener.scoring import score_universe_sector_adjusted
+
 
 def test_score_range():
     """All scores should be between 0 and 100."""
     df = pd.DataFrame({
         "company": [f"Co{i}" for i in range(10)],
+        "sector": ["Tech"] * 5 + ["Health"] * 5,
         "ebitda_margin": np.random.uniform(0.05, 0.40, 10),
         "roic": np.random.uniform(0.05, 0.30, 10),
         "fcf_conversion": np.random.uniform(0.3, 0.9, 10),
@@ -25,19 +27,23 @@ def test_score_range():
         "ebitda_margin": 0.15, "roic": 0.10, "fcf_conversion": 0.15,
         "ocf_margin": 0.10, "net_debt_to_ebitda": 0.10, "interest_coverage": 0.10,
         "revenue_growth": 0.10, "ebitda_growth": 0.05, "ev_to_ebitda": 0.15
-    }, "invert_metrics": ["net_debt_to_ebitda", "ev_to_ebitda"]}
-    df = score_universe(df, cfg)
+    }, "invert_metrics": ["net_debt_to_ebitda", "ev_to_ebitda"],
+    "scoring": {"sector_weight": 0.60, "universe_weight": 0.40}}
+    df = score_universe_sector_adjusted(df, cfg)
     assert df["pe_score"].between(0, 100).all()
+
 
 def test_weights_sum_doesnt_matter():
     """Even if weights don't sum to 1, result should be normalized."""
     df = pd.DataFrame({
         "company": ["A", "B", "C"],
+        "sector": ["Tech", "Tech", "Tech"],
         "ebitda_margin": [0.30, 0.15, 0.10],
         "ev_to_ebitda": [8.0, 12.0, 16.0],
     })
     cfg = {"weights": {"ebitda_margin": 5, "ev_to_ebitda": 5},
-           "invert_metrics": ["ev_to_ebitda"]}
-    df = score_universe(df, cfg)
+           "invert_metrics": ["ev_to_ebitda"],
+           "scoring": {"sector_weight": 0.60, "universe_weight": 0.40}}
+    df = score_universe_sector_adjusted(df, cfg)
     # A should rank #1 (high margin, low EV/EBITDA)
     assert df.loc[0, "pe_score"] > df.loc[2, "pe_score"]

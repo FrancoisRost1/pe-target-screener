@@ -8,8 +8,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from screener.ratios import (
     compute_ebitda_margin, compute_net_debt, compute_net_debt_to_ebitda,
-    compute_interest_coverage, compute_fcf_conversion, compute_roic,
-    compute_ev_to_ebitda, compute_revenue_growth,
+    compute_interest_coverage, compute_fcf_conversion,
+)
+from screener.ratios_secondary import (
+    compute_roic, compute_ev_to_ebitda, compute_revenue_growth,
 )
 
 @pytest.fixture

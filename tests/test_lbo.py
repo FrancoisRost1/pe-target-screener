@@ -5,8 +5,9 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from screener.lbo import _amortize_debt, compute_scenario_irr, compute_lbo_metrics
-from screener.scoring import apply_irr_hurdle_penalty
+from screener.lbo import compute_lbo_metrics, _build_cashflows_and_compute_irr
+from screener.lbo_scenarios import compute_scenario_irr
+from screener.scoring_adjustments import apply_irr_hurdle_penalty
 
 
 # ---------------------------------------------------------------------------
@@ -44,52 +45,47 @@ def _base_cfg() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# _amortize_debt tests
+# _build_cashflows_and_compute_irr tests
 # ---------------------------------------------------------------------------
 
-def test_amortize_debt_reduces_correctly():
-    """
-    Debt should reduce by FCF × rate each year until exhausted.
-
-    With max_debt=100, annual_fcf=50, rate=0.4, years=5:
-      Year 1: repay min(50×0.4=20, 100)=20 → debt=80
-      Year 2: repay min(20, 80)=20 → debt=60
-      Year 3: →40, Year 4: →20, Year 5: →0
-    """
-    max_debt = pd.Series([100.0])
-    annual_fcf = pd.Series([50.0])
-    result = _amortize_debt(max_debt, annual_fcf, debt_repayment_rate=0.4, holding_period=5)
-    assert result.iloc[0] == pytest_approx(0.0)
+def test_irr_positive_for_profitable_deal():
+    """A profitable deal (exit equity > entry equity) should have positive IRR."""
+    eq = pd.Series([300.0])
+    debt = pd.Series([700.0])
+    fcf = pd.Series([50.0])
+    exit_ev = pd.Series([1500.0])
+    irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, 5)
+    assert irr.iloc[0] > 0, "Profitable deal should have positive IRR"
 
 
-def test_amortize_debt_cannot_go_negative():
-    """Debt must never go below zero even with very high FCF."""
-    max_debt = pd.Series([100.0])
-    annual_fcf = pd.Series([10_000.0])  # massively overpowered FCF
-    result = _amortize_debt(max_debt, annual_fcf, debt_repayment_rate=0.4, holding_period=5)
-    assert result.iloc[0] == 0.0
+def test_irr_nan_for_zero_equity():
+    """Zero equity should produce NaN IRR (invalid deal)."""
+    eq = pd.Series([0.0])
+    debt = pd.Series([700.0])
+    fcf = pd.Series([50.0])
+    exit_ev = pd.Series([1500.0])
+    irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, 5)
+    assert pd.isna(irr.iloc[0])
 
 
-def test_amortize_debt_partial_paydown():
-    """
-    With modest FCF relative to debt, some debt should remain at exit.
-
-    max_debt=500, annual_fcf=40, rate=0.4, years=5:
-      Annual repayment = 40 × 0.4 = 16 per year → total repaid = 80
-      debt_remaining = 500 - 80 = 420
-    """
-    max_debt = pd.Series([500.0])
-    annual_fcf = pd.Series([40.0])
-    result = _amortize_debt(max_debt, annual_fcf, debt_repayment_rate=0.4, holding_period=5)
-    assert abs(result.iloc[0] - 420.0) < 0.01
+def test_irr_nan_when_exit_equity_negative():
+    """If exit EV < remaining debt, exit equity is negative → NaN IRR."""
+    eq = pd.Series([300.0])
+    debt = pd.Series([700.0])
+    fcf = pd.Series([0.0])  # no FCF → no debt paydown
+    exit_ev = pd.Series([500.0])  # exit EV < debt → negative exit equity
+    irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, 5)
+    assert pd.isna(irr.iloc[0])
 
 
-def test_amortize_debt_zero_fcf():
-    """Zero FCF means no debt repayment — full debt remains at exit."""
-    max_debt = pd.Series([300.0])
-    annual_fcf = pd.Series([0.0])
-    result = _amortize_debt(max_debt, annual_fcf, debt_repayment_rate=0.4, holding_period=5)
-    assert result.iloc[0] == 300.0
+def test_irr_capped_at_40pct():
+    """IRR should be capped at 40% regardless of deal economics."""
+    eq = pd.Series([100.0])
+    debt = pd.Series([0.0])
+    fcf = pd.Series([0.0])
+    exit_ev = pd.Series([10_000.0])  # massive exit → would be >100% IRR uncapped
+    irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, 5)
+    assert irr.iloc[0] <= 0.40
 
 
 # ---------------------------------------------------------------------------
