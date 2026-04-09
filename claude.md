@@ -6,26 +6,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Install dependencies
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 
 # Run full pipeline (fetches live data from yfinance)
-python main.py
+python3 main.py
 
 # Run without refetching (use cached data/raw/companies_raw.csv)
-python main.py --no-fetch
+python3 main.py --no-fetch
 
 # Change number of top targets shown
-python main.py --top 30
+python3 main.py --top 30
+
+# Use a non-default config file
+python3 main.py --config path/to/other.yaml
 
 # Run all tests
 pytest tests/ -v
 
-# Run a single test file
+# Run a single test file (or single test by name)
 pytest tests/test_lbo.py -v
+pytest tests/test_lbo.py::test_compute_max_debt -v
 
 # Launch Streamlit dashboard
 streamlit run app/streamlit_app.py
 ```
+
+`python` is not installed on this machine — always use `python3`.
 
 ## Architecture
 
@@ -55,10 +61,14 @@ The pre-filter snapshot (`df_pre_filter`) is saved before eligibility filters so
 
 3. **Final ranking** is by `pe_score_final`, not `pe_score_adjusted`.
 
-### LBO model (`screener/lbo.py`)
+### LBO model (`screener/lbo.py` + `screener/lbo_scenarios.py`)
+
+`lbo.py` is the entry point and owns `compute_max_debt` + `compute_fcf_yield_on_equity`. Scenario IRRs and the IRR bridge live in `lbo_scenarios.py` and are imported lazily inside `compute_lbo_metrics()`.
 
 Key design decisions:
 - **No separate interest subtraction**: `debt_repayment_rate=0.40` means 40% of reported FCF sweeps principal. The 60% retained implicitly covers LBO interest + incremental costs. yfinance FCF is already post-interest, so subtracting again would double-count.
+- **Max debt is the lesser of two caps**: `max_debt = min(EBITDA × target_leverage, EV × 0.70)`. The 70% LTV cap binds for low-margin businesses where 3.5x EBITDA would imply implausibly thin equity.
+- **Equity floored at 20% of EV**: if the leverage math implies a smaller cheque, equity is bumped up to 20% of EV and `max_debt` is recomputed as `EV − equity`. No sub-20% sponsor cheques.
 - **Entry multiple floor**: raw `ev_to_ebitda` clipped to 6x minimum in IRR calculations. `ev_to_ebitda < 6x` is set to NaN in `cleaner.py` for scoring (no signal), but the floor prevents "free multiple expansion" artifacts in IRR math.
 - **IRR capped at 40%**: `clip(-0.50, 0.40)` on all scenarios. Unrealistic IRRs above this indicate data issues, not real returns.
 - **Scenario asymmetry**: downside = −3% growth, −1x exit, 80% FCF conversion; upside = +2% growth, +0.5x exit.
@@ -73,18 +83,40 @@ All thresholds, weights, and LBO assumptions live in `config.yaml`. Nothing is h
 
 ### Module responsibilities (one file = one job)
 
+Several modules were split to honour the ~150 line rule. Where a split happened, the original module re-exports the moved functions so old import paths still work — **edit the file where the function actually lives, not the re-export shim**.
+
 | Module | Responsibility |
 |--------|---------------|
 | `loader.py` | yfinance fetch + column validation |
-| `cleaner.py` | Type casting, dedup, winsorization, eligibility filters |
-| `ratios.py` | 11 PE-relevant metrics (all via `_safe_divide()`) |
-| `lbo.py` | IRR estimation: base/up/down scenarios + IRR bridge attribution |
-| `scoring.py` | Sector-adjusted percentile scoring → `pe_score_final` |
-| `classifier.py` | Debt capacity (High/Med/Low), red flags, deal killer penalty |
+| `cleaner.py` | Type casting, dedup, winsorization. Re-exports `apply_eligibility_filters` from `eligibility.py`. |
+| `eligibility.py` | Hard pre-scoring filters (size, margin, sector exclusions) |
+| `ratios.py` | Core PE-relevant metrics (all via `_safe_divide()`) |
+| `ratios_secondary.py` | Secondary ratios (e.g. capex intensity, FCF yield variants) |
+| `lbo.py` | LBO entry point: `compute_max_debt`, `compute_fcf_yield_on_equity`. Lazily imports scenario engine. |
+| `lbo_scenarios.py` | Base/up/down scenario IRRs + 3-driver IRR bridge attribution |
+| `scoring.py` | Sector-adjusted percentile scoring → `pe_score`, sub-scores. Re-exports `apply_score_adjustments`, `compute_irr_blended_score`, `apply_irr_hurdle_penalty` from `scoring_adjustments.py`. |
+| `scoring_adjustments.py` | Penalty/IRR-blend pipeline that turns `pe_score` into `pe_score_final` |
+| `classifier.py` | Top-level orchestrator: debt capacity, red flag detection, valuation penalty |
+| `classifier_rules.py` | Pure rule functions: `classify_debt_capacity`, `apply_deal_killer_penalty` |
 | `ranking.py` | Sort by `pe_score_final`, assign rank, top-N slice |
 | `changelog.py` | Diff vs previous run to detect rank changes |
+| `changelog_display.py` | Console rendering of the changelog |
 | `exclusion_report.py` | Explain which companies were filtered and why |
+| `exporter.py` | CSV + Excel writers (top-N and full universe) |
 | `summary.py` | Auto-generate investment memo per company |
+
+### Streamlit app structure (`app/`)
+
+`streamlit_app.py` is an orchestrator only — it builds the sidebar and dispatches to tab modules. Edit the tab files for content changes:
+
+| File | Tab |
+|------|-----|
+| `sidebar.py` | Filters and global controls |
+| `tab_table.py` | Top-N table view |
+| `tab_charts.py` | Sector and metric charts |
+| `tab_detail.py` | Single-company drill-down |
+| `tab_lbo_detail.py` | LBO scenario + IRR bridge view |
+| `helpers.py` | Shared formatters and small utilities |
 
 ### Data flow columns
 
