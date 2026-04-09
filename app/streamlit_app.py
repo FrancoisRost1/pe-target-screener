@@ -6,10 +6,13 @@ Run with: streamlit run app/streamlit_app.py
 Orchestrates the pipeline and delegates rendering to tab modules.
 """
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import streamlit as st
 import pandas as pd
 import yaml
-from pathlib import Path
 
 from screener.cleaner import clean, winsorize_ratios, apply_eligibility_filters
 from screener.ratios import compute_all_ratios
