@@ -38,8 +38,9 @@ def load_config():
         return yaml.safe_load(f)
 
 
+@st.cache_data(show_spinner=False)
 def run_pipeline(df_raw: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Run the full screening pipeline."""
+    """Run the full screening pipeline. Cached so repeat slider values are instant."""
     df = clean(df_raw)
     df = compute_all_ratios(df, cfg)
     df = winsorize_ratios(df)

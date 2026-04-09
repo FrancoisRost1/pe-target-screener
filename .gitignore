@@ -16,6 +16,8 @@ env/
 # Data (raw fetched data — don't commit API results)
 data/raw/
 data/processed/
+# data/snapshot/ is intentionally NOT ignored — it ships a small raw CSV so
+# the deployed Streamlit app has data on first load (no live yfinance fetch).
 
 # Outputs (generated — don't commit, let users run it themselves)
 outputs/

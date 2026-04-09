@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Tuple, Optional
 
 
+@st.cache_data(show_spinner=False)
+def _read_csv_cached(path: str) -> pd.DataFrame:
+    """Cached CSV read so the file is only parsed once per session."""
+    return pd.read_csv(path)
+
+
 def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
     """Render sidebar controls and return user selections."""
     st.sidebar.title("⚙️ Screener Controls")
@@ -27,15 +33,21 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
             df_raw = pd.read_csv(uploaded)
             st.sidebar.success(f"Loaded {len(df_raw)} rows")
     else:
-        processed_path = Path(__file__).parent.parent / "outputs" / "companies_scored.csv"
-        raw_path = Path(__file__).parent.parent / "data" / "raw" / "companies_raw.csv"
-        for p in [processed_path, raw_path]:
+        # Lookup order:
+        #   1. data/snapshot/  → committed shipped sample (always present, even on Streamlit Cloud)
+        #   2. data/raw/       → local yfinance cache (gitignored, present after `python3 main.py`)
+        #   3. outputs/        → local pipeline output (gitignored)
+        root = Path(__file__).parent.parent
+        candidates = [
+            root / "data" / "snapshot" / "companies_raw.csv",
+            root / "data" / "raw" / "companies_raw.csv",
+            root / "outputs" / "companies_scored.csv",
+        ]
+        for p in candidates:
             if p.exists():
-                df_raw = pd.read_csv(p)
-                st.sidebar.info(f"Loaded {len(df_raw)} companies from {p.name}")
+                df_raw = _read_csv_cached(str(p))
+                st.sidebar.info(f"Loaded {len(df_raw)} companies from `{p.parent.name}/{p.name}`")
                 break
-        if df_raw is None:
-            st.sidebar.warning("No data found. Run `python main.py` first or upload a CSV.")
 
     # Scoring weights
     st.sidebar.header("2. Scoring Weights")
