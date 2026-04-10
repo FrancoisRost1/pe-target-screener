@@ -4,21 +4,25 @@ ratios.py — Financial ratio computation
 Computes core PE/LBO screening metrics from raw financial data.
 Each function handles division by zero and missing data defensively.
 
-Secondary ratios (ROIC, growth, capex, FCF yield) are in ratios_secondary.py.
+Secondary ratios (ROIC, growth, capex, FCF yield) live in ratios_secondary.py.
+The shared `_safe_divide` helper lives in ratios_utils.py so both modules
+can import it without an import cycle.
 """
 
 import pandas as pd
-import numpy as np
 import logging
+
+from screener.ratios_utils import _safe_divide
+from screener.ratios_secondary import (
+    compute_roic, compute_ev_to_ebitda, compute_revenue_growth,
+    compute_ebitda_growth, compute_capex_to_revenue, compute_fcf_yield_on_ev,
+)
 
 logger = logging.getLogger(__name__)
 
+
 def compute_all_ratios(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """Run all ratio computations in sequence."""
-    from screener.ratios_secondary import (
-        compute_roic, compute_ev_to_ebitda, compute_revenue_growth,
-        compute_ebitda_growth, compute_capex_to_revenue, compute_fcf_yield_on_ev,
-    )
     df = df.copy()
     tax_rate = cfg.get("assumptions", {}).get("tax_rate", 0.25)
     min_ic = cfg.get("assumptions", {}).get("min_invested_capital", 1)
@@ -78,16 +82,3 @@ def compute_ocf_margin(df: pd.DataFrame) -> pd.DataFrame:
     """OCF Margin = Operating Cash Flow / Revenue."""
     df["ocf_margin"] = _safe_divide(df.get("operating_cash_flow"), df.get("revenue"))
     return df
-
-
-def _safe_divide(numerator, denominator, fill_zero_denom=True):
-    """Safe element-wise division. Returns NaN on division by zero or missing input."""
-    if numerator is None or denominator is None:
-        return pd.Series(dtype=float)
-    num = pd.to_numeric(numerator, errors="coerce")
-    den = pd.to_numeric(denominator, errors="coerce")
-    with np.errstate(divide="ignore", invalid="ignore"):
-        result = np.where(
-            (den == 0) | den.isna() | num.isna(), np.nan, num / den
-        )
-    return pd.Series(result, index=num.index if hasattr(num, "index") else None)

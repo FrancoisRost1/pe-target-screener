@@ -2,13 +2,14 @@
 ratios_secondary.py — Secondary financial ratio computations
 
 Contains ROIC, EV/EBITDA, growth, capex intensity, and FCF yield ratios.
-All use _safe_divide from ratios.py for safe division.
+All use `_safe_divide` from ratios_utils.py — importing from there (rather
+than from ratios.py) keeps the dependency one-way and avoids any import
+cycle with ratios.py.
 """
 
 import pandas as pd
-import numpy as np
 import logging
-from screener.ratios import _safe_divide
+from screener.ratios_utils import _safe_divide
 
 logger = logging.getLogger(__name__)
 

@@ -63,7 +63,9 @@ The pre-filter snapshot (`df_pre_filter`) is saved before eligibility filters so
 
 ### LBO model (`screener/lbo.py` + `screener/lbo_scenarios.py`)
 
-`lbo.py` is the entry point and owns `compute_max_debt` + `compute_fcf_yield_on_equity`. Scenario IRRs and the IRR bridge live in `lbo_scenarios.py` and are imported lazily inside `compute_lbo_metrics()`.
+`lbo.py` is the entry point and owns `compute_max_debt`, `compute_lbo_metrics`, and `compute_fcf_yield_on_equity`. The IRR engine itself (`_build_cashflows_and_compute_irr`, `_compute_single_irr`) and all scenario / bridge functions live in `lbo_scenarios.py`. Dependency is strictly one-way (`lbo → lbo_scenarios`) so the import graph stays acyclic — no lazy/inline imports needed.
+
+`_build_cashflows_and_compute_irr` returns NaN for every row when `holding_period < 1` to guard against degenerate timelines.
 
 Key design decisions:
 - **No separate interest subtraction**: `debt_repayment_rate=0.40` means 40% of reported FCF sweeps principal. The 60% retained implicitly covers LBO interest + incremental costs. yfinance FCF is already post-interest, so subtracting again would double-count.
@@ -83,19 +85,20 @@ All thresholds, weights, and LBO assumptions live in `config.yaml`. Nothing is h
 
 ### Module responsibilities (one file = one job)
 
-Several modules were split to honour the ~150 line rule. Where a split happened, the original module re-exports the moved functions so old import paths still work — **edit the file where the function actually lives, not the re-export shim**.
+Several modules were split to honour the ~150 line rule. The split pairs use a strict one-way dependency (parent → child) so the import graph is a DAG with no cycles — verified by an AST scan. **Edit the file where the function actually lives.**
 
 | Module | Responsibility |
 |--------|---------------|
 | `loader.py` | yfinance fetch + column validation |
 | `cleaner.py` | Type casting, dedup, winsorization. Re-exports `apply_eligibility_filters` from `eligibility.py`. |
 | `eligibility.py` | Hard pre-scoring filters (size, margin, sector exclusions) |
-| `ratios.py` | Core PE-relevant metrics (all via `_safe_divide()`) |
-| `ratios_secondary.py` | Secondary ratios (e.g. capex intensity, FCF yield variants) |
-| `lbo.py` | LBO entry point: `compute_max_debt`, `compute_fcf_yield_on_equity`. Lazily imports scenario engine. |
-| `lbo_scenarios.py` | Base/up/down scenario IRRs + 3-driver IRR bridge attribution |
+| `ratios_utils.py` | Shared low-level helper `_safe_divide()` — separate file so `ratios.py` and `ratios_secondary.py` can both import it without a cycle. |
+| `ratios.py` | Core PE metrics (margin, leverage, coverage, conversion). Imports `_safe_divide` from `ratios_utils.py` and re-exports the secondary ratio functions from `ratios_secondary.py`. |
+| `ratios_secondary.py` | Secondary ratios: ROIC, EV/EBITDA, growth, capex intensity, FCF yield. Imports `_safe_divide` from `ratios_utils.py` (never from `ratios.py`). |
+| `lbo.py` | Top-level orchestrator: `compute_lbo_metrics`, `compute_max_debt`, `compute_fcf_yield_on_equity`. Imports scenario functions from `lbo_scenarios.py` at module level. |
+| `lbo_scenarios.py` | IRR engine (`_build_cashflows_and_compute_irr`, `_compute_single_irr`) + scenario IRRs + 3-driver bridge attribution. Does NOT import from `lbo.py`. |
 | `scoring.py` | Sector-adjusted percentile scoring → `pe_score`, sub-scores. Re-exports `apply_score_adjustments`, `compute_irr_blended_score`, `apply_irr_hurdle_penalty` from `scoring_adjustments.py`. |
-| `scoring_adjustments.py` | Penalty/IRR-blend pipeline that turns `pe_score` into `pe_score_final` |
+| `scoring_adjustments.py` | Penalty/IRR-blend pipeline that turns `pe_score` into `pe_score_final`. Imports `apply_deal_killer_penalty` from `classifier_rules.py` (not `classifier.py`). |
 | `classifier.py` | Top-level orchestrator: debt capacity, red flag detection, valuation penalty |
 | `classifier_rules.py` | Pure rule functions: `classify_debt_capacity`, `apply_deal_killer_penalty` |
 | `ranking.py` | Sort by `pe_score_final`, assign rank, top-N slice |

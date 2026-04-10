@@ -5,8 +5,10 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from screener.lbo import compute_lbo_metrics, _build_cashflows_and_compute_irr
-from screener.lbo_scenarios import compute_scenario_irr
+from screener.lbo import compute_lbo_metrics
+from screener.lbo_scenarios import (
+    compute_scenario_irr, _build_cashflows_and_compute_irr,
+)
 from screener.scoring_adjustments import apply_irr_hurdle_penalty
 
 
@@ -86,6 +88,17 @@ def test_irr_capped_at_40pct():
     exit_ev = pd.Series([10_000.0])  # massive exit → would be >100% IRR uncapped
     irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, 5)
     assert irr.iloc[0] <= 0.40
+
+
+def test_irr_invalid_holding_period_returns_nan():
+    """holding_period < 1 is meaningless — should return NaN, not a clipped IRR."""
+    eq = pd.Series([300.0])
+    debt = pd.Series([700.0])
+    fcf = pd.Series([50.0])
+    exit_ev = pd.Series([1500.0])
+    for hp in (0, -1):
+        irr = _build_cashflows_and_compute_irr(eq, debt, fcf, exit_ev, 0.4, hp)
+        assert pd.isna(irr.iloc[0]), f"holding_period={hp} should produce NaN"
 
 
 # ---------------------------------------------------------------------------
