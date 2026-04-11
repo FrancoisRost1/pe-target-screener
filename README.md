@@ -1,7 +1,7 @@
 # Private Equity Target Screener
 
 A Python-based private equity screening and deal evaluation engine that identifies potential LBO/buyout candidates from a universe of public companies.
-Built to reflect the analytical logic of a private equity analyst — not just financial ratios, but structured judgment about leverage capacity, cash quality, and entry valuation.
+Built to reflect the analytical logic of a private equity analyst: not just financial ratios, but structured judgment about leverage capacity, cash quality, and entry valuation.
 
 ---
 
@@ -22,10 +22,10 @@ Built to reflect the analytical logic of a private equity analyst — not just f
 Most screeners rank "good companies."
 
 Private equity cares about something different:
-- **Entry price** — a great business at the wrong price destroys returns
-- **Leverage capacity** — how much debt can the business support?
-- **Cash generation** — is there enough FCF to service debt and create equity value?
-- **Exit potential** — what's the realistic return to the investor?
+- **Entry price:** a great business at the wrong price destroys returns
+- **Leverage capacity:** how much debt can the business support?
+- **Cash generation:** is there enough FCF to service debt and create equity value?
+- **Exit potential:** what's the realistic return to the investor?
 
 A high-quality company can still be a bad investment if acquired at the wrong price. This tool explicitly captures that difference.
 
@@ -42,7 +42,7 @@ Beyond screening, the model estimates an implied IRR for each company under simp
 | Debt interest rate | 7% | Annual cost of LBO debt |
 | EBITDA growth | Actual YoY | Organic growth trajectory |
 | FCF → debt repayment | 40% annually | Cash sweep after interest |
-| Exit multiple | 8x EV/EBITDA (cap) | Conservative — never above entry |
+| Exit multiple | 8x EV/EBITDA (cap) | Conservative, never above entry |
 | Holding period | 5 years | Standard PE hold |
 
 **Three scenarios are computed per company:**
@@ -58,12 +58,12 @@ The IRR is decomposed into its 3 drivers: EBITDA growth contribution, debt paydo
 
 - **Real financial data** fetched via `yfinance` (public companies, no API key needed)
 - **8 core PE metrics** computed from raw financials
-- **Weighted scoring engine** — configurable via `config.yaml`, no code change needed
-- **Debt capacity classification** — High / Medium / Low based on PE-style rules
-- **Red flag detection** — automated warning signals per company
-- **Investment memo snippet** — auto-generated summary for top candidates
-- **CSV + Excel export** — ready for further analysis
-- **Interactive Streamlit dashboard** — filters, sliders, drill-down, downloadable output
+- **Weighted scoring engine:** configurable via `config.yaml`, no code change needed
+- **Debt capacity classification:** High / Medium / Low based on PE-style rules
+- **Red flag detection:** automated warning signals per company
+- **Investment memo snippet:** auto-generated summary for top candidates
+- **CSV + Excel export:** ready for further analysis
+- **Interactive Streamlit dashboard:** filters, sliders, drill-down, downloadable output
 
 ---
 
@@ -71,11 +71,11 @@ The IRR is decomposed into its 3 drivers: EBITDA growth contribution, debt paydo
 
 | Metric | Formula | PE Rationale | LBO Impact |
 |---|---|---|---|
-| EBITDA Margin | EBITDA / Revenue | Core profitability proxy | Higher margin → more cash to service debt |
+| EBITDA Margin | EBITDA / Revenue | Core profitability proxy | Higher margin means more cash to service debt |
 | ROIC | NOPAT / Invested Capital | Capital efficiency | Strong ROIC signals defensible business |
-| FCF Conversion | FCF / EBITDA | Cash quality | Direct driver of debt paydown → equity creation |
+| FCF Conversion | FCF / EBITDA | Cash quality | Direct driver of debt paydown and equity creation |
 | FCF Yield on EV | FCF / EV | Real cash return vs price | Complements EV/EBITDA with actual cash view |
-| Net Debt / EBITDA | (Debt − Cash) / EBITDA | Leverage headroom | Lower = more room to add LBO debt |
+| Net Debt / EBITDA | (Debt minus Cash) / EBITDA | Leverage headroom | Lower = more room to add LBO debt |
 | Interest Coverage | EBIT / Interest Expense | Debt service capacity | Floor for lender approval |
 | EV / EBITDA | EV / EBITDA | Entry valuation | Biggest single driver of IRR math |
 | Revenue Growth | YoY % | Growth trajectory | Drives exit EBITDA and deleveraging speed |
@@ -91,7 +91,7 @@ pe-target-screener/
 ├── claude.md               # Project journal + Claude Code instructions
 ├── requirements.txt
 ├── config.yaml             # All weights, thresholds, assumptions
-├── main.py                 # Orchestrator — runs the full pipeline
+├── main.py                 # Orchestrator, runs the full pipeline
 ├── data/
 │   ├── raw/                # Raw data fetched from yfinance
 │   ├── processed/          # Scored and enriched dataset
@@ -168,11 +168,11 @@ No code change needed to adjust the model.
 
 ## Limitations
 
-- **Simplified LBO structure** — no debt tranches, PIK, or revolving credit facility
-- **IRR cap at 40%** — companies hitting this cap (e.g. very cheap entry + high FCF) show identical scenario spreads; treat as "exceptionally attractive" rather than a precise number
-- **Exit multiple assumptions** — model caps exit at entry multiple (conservative); real deals may achieve expansion or contraction depending on market cycles
-- **Financial data quality** — depends on yfinance; some tickers return incomplete data and are excluded
-- **Public comps only** — private company dynamics (EBITDA add-backs, management fees, synergies) are not modelled
+- **Simplified LBO structure:** no debt tranches, PIK, or revolving credit facility
+- **IRR cap at 40%:** companies hitting this cap (e.g. very cheap entry + high FCF) show identical scenario spreads; treat as "exceptionally attractive" rather than a precise number
+- **Exit multiple assumptions:** model caps exit at entry multiple (conservative); real deals may achieve expansion or contraction depending on market cycles
+- **Financial data quality:** depends on yfinance; some tickers return incomplete data and are excluded
+- **Public comps only:** private company dynamics (EBITDA add-backs, management fees, synergies) are not modelled
 
 The model is designed as a deal sourcing and prioritisation tool, not a full investment model.
 

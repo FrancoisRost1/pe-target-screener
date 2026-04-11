@@ -14,18 +14,18 @@ def render_kpis(df, df_filtered, score_col, run_cfg):
     c1.metric("Companies Screened", len(df))
     c2.metric("After Filters", len(df_filtered))
     c3.metric("Avg Final Score",
-              f"{df_filtered[score_col].mean():.1f}" if len(df_filtered) else "—")
+              f"{df_filtered[score_col].mean():.1f}" if len(df_filtered) else "n/a")
     c4.metric("High Debt Capacity", int((df_filtered["debt_capacity"] == "High").sum()))
 
     irr_col = "irr_base" if "irr_base" in df_filtered.columns else "irr_proxy"
     irr_median = df_filtered[irr_col].median() if irr_col in df_filtered.columns else None
     c5.metric("Median IRR (Base)",
-              fmt_irr(irr_median) if irr_median is not None and not np.isnan(irr_median) else "—")
+              fmt_irr(irr_median) if irr_median is not None and not np.isnan(irr_median) else "n/a")
 
     lbo_cfg = run_cfg.get("lbo", {})
     if irr_median is not None and not np.isnan(irr_median) and irr_median < 0.12:
         st.info(
-            f"ℹ️ **Market context:** Under current assumptions "
+            f"**Market context:** Under current assumptions "
             f"({int(lbo_cfg.get('holding_period', 5))}yr hold, "
             f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit, "
             f"{lbo_cfg.get('target_leverage', 4.0):.1f}x leverage), "
@@ -37,7 +37,7 @@ def render_kpis(df, df_filtered, score_col, run_cfg):
 
 def render_top_table(df_top, top_n, score_col, run_cfg):
     """Render the top targets table with formatted columns."""
-    st.subheader(f"🏆 Top {top_n} Candidates")
+    st.subheader(f"Top {top_n} Candidates")
 
     TABLE_COLS = [
         "rank", "ticker", "company", "sector",
@@ -72,9 +72,9 @@ def render_top_table(df_top, top_n, score_col, run_cfg):
     st.caption(
         f"IRR (Base): {int(lbo_cfg.get('holding_period', 5))}yr hold, "
         f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit cap. "
-        f"IRR (Down): exit cap −1x, growth −3%. "
-        "Annual amortization at 40% FCF. Simplified model — indicative only."
+        f"IRR (Down): exit cap minus 1x, growth minus 3%. "
+        "Annual amortization at 40% FCF. Simplified model, indicative only."
     )
 
     csv = df_top.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download Top Targets CSV", csv, "top_targets.csv", "text/csv")
+    st.download_button("Download Top Targets CSV", csv, "top_targets.csv", "text/csv")

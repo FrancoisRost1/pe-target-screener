@@ -48,7 +48,7 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
     exit_equity = exit_ev - debt_remaining
     moic = exit_equity / eq_req_val if eq_req_val > 0 else float("nan")
 
-    with st.expander("🧮 LBO Deal Breakdown"):
+    with st.expander("LBO Deal Breakdown"):
         lev_exp = lbo_cfg.get("target_leverage", 3.5)
         st.markdown(f"""
 **Base Case Assumptions**
@@ -58,7 +58,7 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
 | Entry multiple | {fmt_mult(row.get("ev_to_ebitda"))} EV/EBITDA |
 | Exit multiple (cap) | {exit_multiple_cap:.0f}x EV/EBITDA |
 | Target leverage | {lev_exp:.1f}x EBITDA |
-| FCF → debt repayment | {debt_repayment_rate:.0%} annually |
+| FCF to debt repayment | {debt_repayment_rate:.0%} annually |
 """)
         st.divider()
         b1, b2, b3 = st.columns(3)
@@ -74,7 +74,7 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
         st.markdown("---")
 
         moic_col, irr_col = st.columns(2)
-        moic_col.metric("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "—")
+        moic_col.metric("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "n/a")
         irr_col.metric("Base IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
 
         _render_scenario_irr(row)
@@ -83,15 +83,15 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
 
 def _render_scenario_irr(row: pd.Series):
     """Render the 3-scenario IRR view with bar chart."""
-    st.markdown("**📊 IRR Scenarios**")
+    st.markdown("**IRR Scenarios**")
     irr_base_val = row.get("irr_base", row.get("irr_proxy"))
     irr_up_val = row.get("irr_upside")
     irr_dn_val = row.get("irr_downside")
 
     s1, s2, s3 = st.columns(3)
-    s1.metric("⬇️ Downside", fmt_irr(irr_dn_val), delta=fmt_irr_delta(irr_dn_val, irr_base_val))
-    s2.metric("📊 Base Case", fmt_irr(irr_base_val))
-    s3.metric("⬆️ Upside", fmt_irr(irr_up_val), delta=fmt_irr_delta(irr_up_val, irr_base_val))
+    s1.metric("Downside", fmt_irr(irr_dn_val), delta=fmt_irr_delta(irr_dn_val, irr_base_val))
+    s2.metric("Base Case", fmt_irr(irr_base_val))
+    s3.metric("Upside", fmt_irr(irr_up_val), delta=fmt_irr_delta(irr_up_val, irr_base_val))
 
     scenario_vals = {"Downside": irr_dn_val, "Base": irr_base_val, "Upside": irr_up_val}
     valid = {k: v for k, v in scenario_vals.items() if v is not None and not pd.isna(v)}
@@ -126,7 +126,7 @@ def _render_irr_bridge(row: pd.Series):
     if not any(abs(v) > 0.001 for v in [growth_drv, delev_drv, mult_drv]):
         return
 
-    st.markdown("**🔑 IRR Decomposition (PE Return Attribution)**")
+    st.markdown("**IRR Decomposition (PE Return Attribution)**")
     labels = ["EBITDA Growth", "Debt paydown", "Multiple delta"]
     vals = [growth_drv * 100, delev_drv * 100, mult_drv * 100]
     colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in vals]
@@ -140,5 +140,5 @@ def _render_irr_bridge(row: pd.Series):
     fig.update_layout(height=220, margin=dict(t=30, b=10, l=10, r=10),
                       yaxis=dict(title="IRR contribution (%)", range=[-y_abs_max, y_abs_max]),
                       xaxis=dict(title=""),
-                      title=dict(text=f"Base IRR: {fmt_irr(irr_base_val)} — by driver", font=dict(size=12)))
+                      title=dict(text=f"Base IRR: {fmt_irr(irr_base_val)} by driver", font=dict(size=12)))
     st.plotly_chart(fig, use_container_width=True)

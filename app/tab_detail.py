@@ -32,7 +32,7 @@ def render_company_detail(row: pd.Series, cfg: dict = None):
 def _render_metrics(row: pd.Series, cfg: dict = None):
     """Render metric cards and LBO breakdown expander."""
     st.markdown(f"### {row.get('company', row.get('ticker'))}")
-    st.caption(f"**Sector:** {row.get('sector', '—')}  |  **Rank:** #{int(row.get('rank', 0))}")
+    st.caption(f"**Sector:** {row.get('sector', 'n/a')}  |  **Rank:** #{int(row.get('rank', 0))}")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Final Score", fmt_score(row.get("pe_score_final", row.get("pe_score_adjusted", row.get("pe_score")))))
@@ -52,8 +52,8 @@ def _render_metrics(row: pd.Series, cfg: dict = None):
     if raw is not None and adj is not None and final is not None \
             and not pd.isna(raw) and not pd.isna(adj) and not pd.isna(final):
         st.caption(
-            f"Raw: {raw:.1f} → Adj: {adj:.1f} → Final (IRR-blended): {final:.1f} "
-            f"(Δ {final - raw:+.1f} vs raw)"
+            f"Raw: {raw:.1f} | Adjusted: {adj:.1f} | Final (IRR-blended): {final:.1f} "
+            f"(delta {final - raw:+.1f} vs raw)"
         )
 
     render_lbo_expander(row, cfg)
@@ -63,11 +63,11 @@ def _render_memo_and_flags(row: pd.Series):
     """Render investment memo and red flags."""
     memo = row.get("investment_memo", "")
     if memo:
-        st.markdown("**📋 Investment Memo**")
+        st.markdown("**Investment Memo**")
         st.markdown(memo.replace("\n", "  \n"))
     flags = row.get("red_flags", "")
     if flags and not (isinstance(flags, float) and np.isnan(flags)):
-        st.warning(f"⚠️ **Red Flags:** {flags}")
+        st.warning(f"**Red Flags:** {flags}")
 
 
 def _render_radar(row: pd.Series):
@@ -89,7 +89,7 @@ def _render_radar(row: pd.Series):
 
 def _render_penalties(row: pd.Series):
     """Render debt capacity badge and penalty breakdown."""
-    dc = row.get("debt_capacity", "—")
+    dc = row.get("debt_capacity", "n/a")
     st.metric("Debt Capacity", f"{debt_capacity_color(dc)} {dc}")
     rf_pen = row.get("red_flag_penalty", 0) or 0
     val_pen = row.get("valuation_penalty", 0) or 0

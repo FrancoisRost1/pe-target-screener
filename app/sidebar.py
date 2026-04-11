@@ -16,7 +16,7 @@ def _read_csv_cached(path: str) -> pd.DataFrame:
 
 def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
     """Render sidebar controls and return user selections."""
-    st.sidebar.title("⚙️ Screener Controls")
+    st.sidebar.title("Screener Controls")
 
     # Data source
     st.sidebar.header("1. Data Source")
@@ -68,11 +68,11 @@ def sidebar(cfg: dict) -> Tuple[Optional[pd.DataFrame], dict, dict, dict]:
 
     # LBO assumptions
     st.sidebar.header("3. LBO Assumptions")
-    st.sidebar.caption("Override model parameters — affects IRR estimates")
+    st.sidebar.caption("Override model parameters to affect IRR estimates")
     lbo_defaults = cfg.get("lbo", {})
     lbo_overrides = {
         "exit_multiple": st.sidebar.slider(
-            "Entry → Exit Multiple (x)", 6.0, 14.0,
+            "Exit Multiple (x)", 6.0, 14.0,
             float(lbo_defaults.get("exit_multiple", 8.0)), step=0.5,
         ),
         "holding_period": st.sidebar.slider(

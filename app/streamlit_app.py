@@ -26,7 +26,7 @@ from app.tab_table import render_kpis, render_top_table
 from app.tab_charts import render_charts, render_deal_quadrant, render_top_opportunities
 from app.tab_detail import render_company_detail
 
-st.set_page_config(page_title="PE Target Screener", page_icon="📊",
+st.set_page_config(page_title="PE Target Screener",
                    layout="wide", initial_sidebar_state="expanded")
 
 
@@ -58,12 +58,12 @@ def run_pipeline(df_raw: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 def main():
     """Main dashboard entry point."""
     cfg = load_config()
-    st.title("📊 Private Equity Target Screener")
-    st.caption("Identify LBO candidates — sector-adjusted scoring, IRR proxy, valuation penalty.")
+    st.title("Private Equity Target Screener")
+    st.caption("Identify LBO candidates using sector-adjusted scoring, IRR proxy, and valuation penalty.")
 
     df_raw, custom_weights, lbo_overrides, filters = sidebar(cfg)
     if df_raw is None:
-        st.info("👈 Configure your data source in the sidebar to get started.")
+        st.info("Configure your data source in the sidebar to get started.")
         return
 
     run_cfg = {**cfg, "weights": custom_weights, "lbo": {**cfg.get("lbo", {}), **lbo_overrides}}
@@ -102,7 +102,7 @@ def main():
     render_top_opportunities(df_filtered, score_col)
     st.markdown("---")
 
-    st.subheader("🔍 Company Detail")
+    st.subheader("Company Detail")
     col_key = "company" if "company" in df_top.columns else "ticker"
     selected = st.selectbox("Select a company", df_top[col_key].tolist())
     if selected:

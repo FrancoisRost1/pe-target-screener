@@ -42,7 +42,7 @@ def render_charts(df_filtered: pd.DataFrame, df_top: pd.DataFrame,
 
 def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
     """Render the deal quadrant chart (Quality vs Valuation)."""
-    st.subheader("Deal Quadrant — Quality vs Valuation")
+    st.subheader("Deal Quadrant: Quality vs Valuation")
     quad_df = df_top.dropna(subset=["ev_to_ebitda", "quality_score"]).copy()
 
     if quad_df.empty:
@@ -63,7 +63,7 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
         },
         color_discrete_map=color_map,
         labels={
-            "ev_to_ebitda": "EV/EBITDA — Entry Valuation (lower = better)",
+            "ev_to_ebitda": "EV/EBITDA, Entry Valuation (lower = better)",
             "quality_score": "Quality Score (higher = better)",
         },
         size_max=45,
@@ -96,10 +96,10 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
     fig3.add_vline(x=x_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
 
     quadrant_labels = [
-        (x_min, y_max, "🎯 Sweet Spot", "left", "top"),
-        (x_max, y_max, "💰 Quality Premium", "right", "top"),
-        (x_min, y_min, "⚠️ Value Trap?", "left", "bottom"),
-        (x_max, y_min, "❌ Avoid", "right", "bottom"),
+        (x_min, y_max, "Sweet Spot", "left", "top"),
+        (x_max, y_max, "Quality Premium", "right", "top"),
+        (x_min, y_min, "Value Trap?", "left", "bottom"),
+        (x_max, y_min, "Avoid", "right", "bottom"),
     ]
     for qx, qy, text, xanchor, yanchor in quadrant_labels:
         fig3.add_annotation(
@@ -128,11 +128,11 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
 
 def render_top_opportunities(df_filtered: pd.DataFrame, score_col: str):
     """Render the top opportunities and watch list sections."""
-    st.subheader("🎯 Top Opportunities")
+    st.subheader("Top Opportunities")
     opp_left, opp_right = st.columns(2)
 
     with opp_left:
-        st.markdown("**🟢 Best LBO Candidates**")
+        st.markdown("**Best LBO Candidates**")
         score_75th = df_filtered[score_col].quantile(0.75) if len(df_filtered) else 0
         best_mask = (
             (df_filtered["debt_capacity"].isin(["High"]) |
@@ -146,18 +146,18 @@ def render_top_opportunities(df_filtered: pd.DataFrame, score_col: str):
             st.markdown("_No companies match this filter._")
         else:
             for _, r in best.iterrows():
-                dc = r.get("debt_capacity", "—")
+                dc = r.get("debt_capacity", "n/a")
                 irr = r.get("irr_proxy")
                 irr_str = fmt_irr(irr) if irr is not None and not (isinstance(irr, float) and np.isnan(irr)) else "N/A"
-                name = r.get("company", r.get("ticker", "—"))
+                name = r.get("company", r.get("ticker", "n/a"))
                 score_val = r.get(score_col, float("nan"))
                 st.markdown(
-                    f"**#{int(r.get('rank', 0))} — {name}** | "
-                    f"Score: {score_val:.0f} | IRR: {irr_str} | {debt_capacity_color(dc)}"
+                    f"**#{int(r.get('rank', 0))} {name}** | "
+                    f"Score: {score_val:.0f} | IRR: {irr_str} | Debt Cap: {debt_capacity_color(dc)}"
                 )
 
     with opp_right:
-        st.markdown("**🔴 Watch List (red flags)**")
+        st.markdown("**Watch List (red flags)**")
         watch = df_filtered[df_filtered["red_flags"].fillna("") != ""].copy()
         if not watch.empty:
             watch["_flag_count"] = watch["red_flags"].str.count(r"\|") + 1
@@ -166,6 +166,6 @@ def render_top_opportunities(df_filtered: pd.DataFrame, score_col: str):
             st.markdown("_No companies with red flags in current filter._")
         else:
             for _, r in watch.iterrows():
-                name = r.get("company", r.get("ticker", "—"))
+                name = r.get("company", r.get("ticker", "n/a"))
                 flags = r.get("red_flags", "")
-                st.markdown(f"**{name}** | ⚠️ {flags}")
+                st.markdown(f"**{name}** | Flags: {flags}")
