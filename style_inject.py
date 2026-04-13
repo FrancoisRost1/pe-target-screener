@@ -444,21 +444,25 @@ def styled_header(title: str, subtitle: str = ""):
     """
     Page header. Clean, tight.
     Usage: styled_header("LBO Engine", "AAPL | Base Case | 5yr Hold")
+
+    HTML is emitted as a single concatenated line. Leading whitespace on
+    any line of st.markdown input is parsed as a Markdown code block even
+    when unsafe_allow_html=True, which causes </div> tags to leak into
+    the rendered page. Keep these helpers single-line.
     """
-    html = f"""
-    <div style="margin-bottom: 1.25rem;">
-        <h1 style="
-            font-family: {TOKENS["font_display"]};
-            font-weight: 600;
-            font-size: 1.5rem;
-            color: {TOKENS["text_primary"]};
-            letter-spacing: -0.01em;
-            margin: 0;
-            line-height: 1.3;
-        ">{title}</h1>
-        {"<p style='font-size: 0.8rem; color: " + TOKENS["text_muted"] + "; margin-top: 0.2rem; font-family: " + TOKENS["font_body"] + ";'>" + subtitle + "</p>" if subtitle else ""}
-    </div>
-    """
+    sub = (
+        f"<p style=\"font-size:0.8rem;color:{TOKENS['text_muted']};"
+        f"margin-top:0.2rem;font-family:{TOKENS['font_body']};\">{subtitle}</p>"
+        if subtitle else ""
+    )
+    html = (
+        f'<div style="margin-bottom:1.25rem;">'
+        f'<h1 style="font-family:{TOKENS["font_display"]};font-weight:600;'
+        f'font-size:1.5rem;color:{TOKENS["text_primary"]};letter-spacing:-0.01em;'
+        f'margin:0;line-height:1.3;">{title}</h1>'
+        f'{sub}'
+        f'</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -467,22 +471,18 @@ def styled_card(content: str, accent_color: str = None):
     Content card. Tight padding, sharp corners, optional left border.
     Usage: styled_card("Strong quality profile, near fair value.", accent_color=TOKENS["accent_primary"])
     """
-    accent = f"border-left: 3px solid {accent_color};" if accent_color else ""
-    html = f"""
-    <div style="
-        background: {TOKENS["bg_surface"]};
-        border: 1px solid {TOKENS["border_default"]};
-        border-radius: {TOKENS["radius_md"]};
-        padding: 0.75rem 1rem;
-        margin-bottom: 0.75rem;
-        box-shadow: {TOKENS["shadow_sm"]};
-        {accent}
-    ">
-        <span style="color: {TOKENS["text_secondary"]}; font-family: {TOKENS["font_body"]}; font-size: 0.85rem; line-height: 1.5;">
-            {content}
-        </span>
-    </div>
-    """
+    accent = f"border-left:3px solid {accent_color};" if accent_color else ""
+    html = (
+        f'<div style="background:{TOKENS["bg_surface"]};'
+        f'border:1px solid {TOKENS["border_default"]};'
+        f'border-radius:{TOKENS["radius_md"]};'
+        f'padding:0.75rem 1rem;margin-bottom:0.75rem;'
+        f'box-shadow:{TOKENS["shadow_sm"]};{accent}">'
+        f'<span style="color:{TOKENS["text_secondary"]};'
+        f'font-family:{TOKENS["font_body"]};font-size:0.85rem;line-height:1.5;">'
+        f'{content}'
+        f'</span></div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -494,43 +494,30 @@ def styled_kpi(label: str, value: str, delta: str = "", delta_color: str = ""):
     delta_html = ""
     if delta:
         dc = delta_color or TOKENS["accent_success"]
-        delta_html = f'<span style="font-family: {TOKENS["font_mono"]}; font-size: 0.75rem; color: {dc}; font-weight: 500;">{delta}</span>'
-
-    html = f"""
-    <div style="
-        background: {TOKENS["bg_surface"]};
-        border: 1px solid {TOKENS["border_default"]};
-        border-radius: {TOKENS["radius_md"]};
-        padding: 0.65rem 0.9rem;
-        box-shadow: {TOKENS["shadow_sm"]};
-    ">
-        <div style="
-            font-size: 0.65rem;
-            color: {TOKENS["text_muted"]};
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            font-weight: 600;
-            font-family: {TOKENS["font_body"]};
-            margin-bottom: 0.3rem;
-        ">{label}</div>
-        <div style="display: flex; align-items: baseline; gap: 0.5rem;">
-            <span style="
-                font-family: {TOKENS["font_mono"]};
-                font-size: 1.35rem;
-                font-weight: 600;
-                color: {TOKENS["text_primary"]};
-            ">{value}</span>
-            {delta_html}
-        </div>
-    </div>
-    """
+        delta_html = (
+            f'<span style="font-family:{TOKENS["font_mono"]};'
+            f'font-size:0.75rem;color:{dc};font-weight:500;">{delta}</span>'
+        )
+    html = (
+        f'<div style="background:{TOKENS["bg_surface"]};'
+        f'border:1px solid {TOKENS["border_default"]};'
+        f'border-radius:{TOKENS["radius_md"]};'
+        f'padding:0.65rem 0.9rem;box-shadow:{TOKENS["shadow_sm"]};">'
+        f'<div style="font-size:0.65rem;color:{TOKENS["text_muted"]};'
+        f'text-transform:uppercase;letter-spacing:0.1em;font-weight:600;'
+        f'font-family:{TOKENS["font_body"]};margin-bottom:0.3rem;">{label}</div>'
+        f'<div style="display:flex;align-items:baseline;gap:0.5rem;">'
+        f'<span style="font-family:{TOKENS["font_mono"]};font-size:1.35rem;'
+        f'font-weight:600;color:{TOKENS["text_primary"]};">{value}</span>'
+        f'{delta_html}</div></div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
 def styled_divider():
     """Thin horizontal rule."""
     st.markdown(
-        f'<hr style="border: none; border-top: 1px solid {TOKENS["border_subtle"]}; margin: 1rem 0;">',
+        f'<hr style="border:none;border-top:1px solid {TOKENS["border_subtle"]};margin:1rem 0;">',
         unsafe_allow_html=True
     )
 
@@ -540,18 +527,12 @@ def styled_section_label(text: str):
     Small uppercase label for sections.
     Usage: styled_section_label("FILTERS")
     """
-    html = f"""
-    <div style="
-        font-size: 0.65rem;
-        color: {TOKENS["text_muted"]};
-        text-transform: uppercase;
-        letter-spacing: 0.12em;
-        font-weight: 600;
-        font-family: {TOKENS["font_body"]};
-        margin-bottom: 0.5rem;
-        margin-top: 0.75rem;
-    ">{text}</div>
-    """
+    html = (
+        f'<div style="font-size:0.65rem;color:{TOKENS["text_muted"]};'
+        f'text-transform:uppercase;letter-spacing:0.12em;font-weight:600;'
+        f'font-family:{TOKENS["font_body"]};margin-bottom:0.5rem;'
+        f'margin-top:0.75rem;">{text}</div>'
+    )
     st.markdown(html, unsafe_allow_html=True)
 
 
