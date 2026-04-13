@@ -602,7 +602,7 @@ def apply_plotly_theme(fig):
     Usage:
         fig = px.line(df, x="date", y="revenue")
         apply_plotly_theme(fig)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     """
     # Rebuild colorway from current TOKENS in case accent was overridden
     layout = dict(PLOTLY_THEME["layout"])

@@ -73,7 +73,7 @@ def render_top_table(df_top, top_n, score_col, run_cfg):
     col_rename["irr_downside"] = "IRR (Down)"
     col_rename["pe_score_final"] = "Final Score"
     display_df.rename(columns=col_rename, inplace=True)
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
 
     lbo_cfg = run_cfg.get("lbo", {})
     st.caption(

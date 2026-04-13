@@ -132,7 +132,7 @@ def _render_scenario_irr(row: pd.Series):
         title="IRR by Scenario",
     )
     apply_plotly_theme(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_irr_bridge(row: pd.Series):
@@ -164,4 +164,4 @@ def _render_irr_bridge(row: pd.Series):
         title=f"Base IRR: {fmt_irr(irr_base_val)} by driver",
     )
     apply_plotly_theme(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")

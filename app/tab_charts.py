@@ -32,7 +32,7 @@ def render_charts(df_filtered: pd.DataFrame, df_top: pd.DataFrame,
             yaxis_title="Count",
         )
         apply_plotly_theme(fig)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with col_chart2:
         styled_section_label("DEBT CAPACITY")
@@ -51,7 +51,7 @@ def render_charts(df_filtered: pd.DataFrame, df_top: pd.DataFrame,
         )
         fig2.update_layout(height=320)
         apply_plotly_theme(fig2)
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
 
 def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
@@ -147,7 +147,7 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
         yaxis_title="Quality Score",
     )
     apply_plotly_theme(fig3)
-    st.plotly_chart(fig3, use_container_width=True)
+    st.plotly_chart(fig3, width="stretch")
 
 
 def render_top_opportunities(df_filtered: pd.DataFrame, score_col: str):

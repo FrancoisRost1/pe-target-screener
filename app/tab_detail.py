@@ -103,7 +103,7 @@ def _render_radar(row: pd.Series):
         title="Sub-Score Radar",
     )
     apply_plotly_theme(fig)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_penalties(row: pd.Series):
