@@ -1,5 +1,5 @@
 """
-streamlit_app.py — Interactive PE Target Screener Dashboard
+streamlit_app.py | Interactive PE Target Screener Dashboard
 
 Run with: streamlit run app/streamlit_app.py
 
@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 import yaml
@@ -26,8 +27,13 @@ from app.tab_table import render_kpis, render_top_table
 from app.tab_charts import render_charts, render_deal_quadrant, render_top_opportunities
 from app.tab_detail import render_company_detail
 
+from style_inject import (
+    inject_styles, styled_header, styled_divider, styled_section_label, TOKENS,
+)
+
 st.set_page_config(page_title="PE Target Screener",
                    layout="wide", initial_sidebar_state="expanded")
+inject_styles()
 
 
 @st.cache_data
@@ -58,8 +64,11 @@ def run_pipeline(df_raw: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 def main():
     """Main dashboard entry point."""
     cfg = load_config()
-    st.title("Private Equity Target Screener")
-    st.caption("Identify LBO candidates using sector-adjusted scoring, IRR proxy, and valuation penalty.")
+    today = datetime.now().strftime("%Y-%m-%d")
+    styled_header(
+        "Private Equity Target Screener",
+        f"Sector-adjusted scoring | {today} | yfinance",
+    )
 
     df_raw, custom_weights, lbo_overrides, filters = sidebar(cfg)
     if df_raw is None:
@@ -91,23 +100,30 @@ def main():
     top_n = filters["top_n"]
     df_top = df_filtered.head(top_n)
 
-    st.markdown("---")
-    render_kpis(df, df_filtered, score_col, run_cfg)
-    st.markdown("---")
-    render_top_table(df_top, top_n, score_col, run_cfg)
-    st.markdown("---")
-    render_charts(df_filtered, df_top, score_col)
-    render_deal_quadrant(df_top, score_col)
-    st.markdown("---")
-    render_top_opportunities(df_filtered, score_col)
-    st.markdown("---")
+    tab_overview, tab_rankings, tab_charts_view, tab_detail = st.tabs(
+        ["OVERVIEW", "RANKINGS", "CHARTS", "DETAIL"]
+    )
 
-    st.subheader("Company Detail")
-    col_key = "company" if "company" in df_top.columns else "ticker"
-    selected = st.selectbox("Select a company", df_top[col_key].tolist())
-    if selected:
-        row = df_top[df_top[col_key] == selected].iloc[0]
-        render_company_detail(row, cfg=run_cfg)
+    with tab_overview:
+        render_kpis(df, df_filtered, score_col, run_cfg)
+        styled_divider()
+        render_top_opportunities(df_filtered, score_col)
+
+    with tab_rankings:
+        render_top_table(df_top, top_n, score_col, run_cfg)
+
+    with tab_charts_view:
+        render_charts(df_filtered, df_top, score_col)
+        styled_divider()
+        render_deal_quadrant(df_top, score_col)
+
+    with tab_detail:
+        styled_section_label("COMPANY DETAIL")
+        col_key = "company" if "company" in df_top.columns else "ticker"
+        selected = st.selectbox("Select a company", df_top[col_key].tolist())
+        if selected:
+            row = df_top[df_top[col_key] == selected].iloc[0]
+            render_company_detail(row, cfg=run_cfg)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-tab_charts.py — Chart sections for the PE Target Screener dashboard.
+tab_charts.py | Chart sections for the PE Target Screener dashboard.
 
 Renders: score distribution, debt capacity pie, deal quadrant,
 and top opportunities sections.
@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from app.helpers import fmt_irr, debt_capacity_color
+from style_inject import apply_plotly_theme, styled_section_label, TOKENS
 
 
 def render_charts(df_filtered: pd.DataFrame, df_top: pd.DataFrame,
@@ -18,31 +19,44 @@ def render_charts(df_filtered: pd.DataFrame, df_top: pd.DataFrame,
     col_chart1, col_chart2 = st.columns(2)
 
     with col_chart1:
-        st.subheader("Score Distribution")
+        styled_section_label("SCORE DISTRIBUTION")
         fig = px.histogram(
             df_filtered, x=score_col, nbins=20,
-            color_discrete_sequence=["#4C78A8"],
+            color_discrete_sequence=[TOKENS["accent_primary"]],
             labels={score_col: "Adjusted Score"},
+            title="Adjusted Score",
         )
-        fig.update_layout(showlegend=False, height=300, margin=dict(t=10, b=10))
+        fig.update_layout(
+            showlegend=False, height=320,
+            xaxis_title="Adjusted Score",
+            yaxis_title="Count",
+        )
+        apply_plotly_theme(fig)
         st.plotly_chart(fig, use_container_width=True)
 
     with col_chart2:
-        st.subheader("Debt Capacity Breakdown")
+        styled_section_label("DEBT CAPACITY")
         dc_counts = df_filtered["debt_capacity"].value_counts().reset_index()
         dc_counts.columns = ["Category", "Count"]
         fig2 = px.pie(
             dc_counts, names="Category", values="Count",
             color="Category",
-            color_discrete_map={"High": "#2ecc71", "Medium": "#f39c12", "Low": "#e74c3c"},
+            color_discrete_map={
+                "High": TOKENS["accent_success"],
+                "Medium": TOKENS["accent_warning"],
+                "Low": TOKENS["accent_danger"],
+            },
+            title="Debt Capacity Mix",
+            hole=0.65,
         )
-        fig2.update_layout(height=300, margin=dict(t=10, b=10))
+        fig2.update_layout(height=320)
+        apply_plotly_theme(fig2)
         st.plotly_chart(fig2, use_container_width=True)
 
 
 def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
     """Render the deal quadrant chart (Quality vs Valuation)."""
-    st.subheader("Deal Quadrant: Quality vs Valuation")
+    styled_section_label("QUALITY VS VALUATION")
     quad_df = df_top.dropna(subset=["ev_to_ebitda", "quality_score"]).copy()
 
     if quad_df.empty:
@@ -50,7 +64,11 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
 
     quad_df["_bubble"] = quad_df["irr_proxy"].abs().fillna(0.15).clip(lower=0.05)
 
-    color_map = {"High": "#2ecc71", "Medium": "#f39c12", "Low": "#e74c3c"}
+    color_map = {
+        "High": TOKENS["accent_success"],
+        "Medium": TOKENS["accent_warning"],
+        "Low": TOKENS["accent_danger"],
+    }
 
     fig3 = px.scatter(
         quad_df,
@@ -63,9 +81,10 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
         },
         color_discrete_map=color_map,
         labels={
-            "ev_to_ebitda": "EV/EBITDA, Entry Valuation (lower = better)",
-            "quality_score": "Quality Score (higher = better)",
+            "ev_to_ebitda": "EV/EBITDA (x)",
+            "quality_score": "Quality Score",
         },
+        title="Deal Quadrant | Quality vs Valuation",
         size_max=45,
     )
 
@@ -78,33 +97,33 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
 
     zone_shapes = [
         dict(type="rect", xref="x", yref="y", x0=x_min - x_pad, x1=x_mid,
-             y0=y_mid, y1=y_max + y_pad, fillcolor="rgba(46, 204, 113, 0.08)",
+             y0=y_mid, y1=y_max + y_pad, fillcolor="rgba(61,154,80,0.08)",
              line_width=0, layer="below"),
         dict(type="rect", xref="x", yref="y", x0=x_mid, x1=x_max + x_pad,
-             y0=y_mid, y1=y_max + y_pad, fillcolor="rgba(243, 156, 18, 0.08)",
+             y0=y_mid, y1=y_max + y_pad, fillcolor="rgba(200,150,46,0.08)",
              line_width=0, layer="below"),
         dict(type="rect", xref="x", yref="y", x0=x_min - x_pad, x1=x_mid,
-             y0=y_min - y_pad, y1=y_mid, fillcolor="rgba(243, 156, 18, 0.08)",
+             y0=y_min - y_pad, y1=y_mid, fillcolor="rgba(200,150,46,0.08)",
              line_width=0, layer="below"),
         dict(type="rect", xref="x", yref="y", x0=x_mid, x1=x_max + x_pad,
-             y0=y_min - y_pad, y1=y_mid, fillcolor="rgba(231, 76, 60, 0.08)",
+             y0=y_min - y_pad, y1=y_mid, fillcolor="rgba(196,61,61,0.08)",
              line_width=0, layer="below"),
     ]
     fig3.update_layout(shapes=zone_shapes)
 
-    fig3.add_hline(y=y_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
-    fig3.add_vline(x=x_mid, line_dash="dash", line_color="rgba(150,150,150,0.4)", line_width=1)
+    fig3.add_hline(y=y_mid, line_dash="dash", line_color=TOKENS["text_muted"], line_width=1)
+    fig3.add_vline(x=x_mid, line_dash="dash", line_color=TOKENS["text_muted"], line_width=1)
 
     quadrant_labels = [
         (x_min, y_max, "Sweet Spot", "left", "top"),
         (x_max, y_max, "Quality Premium", "right", "top"),
-        (x_min, y_min, "Value Trap?", "left", "bottom"),
+        (x_min, y_min, "Value Trap", "left", "bottom"),
         (x_max, y_min, "Avoid", "right", "bottom"),
     ]
     for qx, qy, text, xanchor, yanchor in quadrant_labels:
         fig3.add_annotation(
             x=qx, y=qy, text=text, showarrow=False,
-            font=dict(size=11, color="rgba(180,180,180,0.8)"),
+            font=dict(size=11, color=TOKENS["text_secondary"]),
             xanchor=xanchor, yanchor=yanchor,
         )
 
@@ -118,17 +137,22 @@ def render_deal_quadrant(df_top: pd.DataFrame, score_col: str):
             x=r["ev_to_ebitda"], y=r["quality_score"],
             text=str(r.get(label_col, "")),
             showarrow=True, arrowhead=2, arrowsize=0.8,
-            arrowcolor="rgba(200,200,200,0.6)", font=dict(size=10),
+            arrowcolor=TOKENS["text_muted"], font=dict(size=10),
             ax=15, ay=-20,
         )
 
-    fig3.update_layout(height=500, margin=dict(t=30, b=30))
+    fig3.update_layout(
+        height=500,
+        xaxis_title="EV/EBITDA (x)",
+        yaxis_title="Quality Score",
+    )
+    apply_plotly_theme(fig3)
     st.plotly_chart(fig3, use_container_width=True)
 
 
 def render_top_opportunities(df_filtered: pd.DataFrame, score_col: str):
     """Render the top opportunities and watch list sections."""
-    st.subheader("Top Opportunities")
+    styled_section_label("TOP OPPORTUNITIES")
     opp_left, opp_right = st.columns(2)
 
     with opp_left:

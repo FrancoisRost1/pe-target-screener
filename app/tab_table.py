@@ -1,31 +1,38 @@
 """
-tab_table.py — KPI cards and top targets table rendering.
+tab_table.py | KPI cards and top targets table rendering.
 """
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 from app.helpers import fmt_pct, fmt_irr, fmt_mult, fmt_score, debt_capacity_color
+from style_inject import styled_kpi, styled_section_label, TOKENS
 
 
 def render_kpis(df, df_filtered, score_col, run_cfg):
-    """Render 5 KPI metric cards."""
+    """Render 5 KPI cards."""
+    styled_section_label("KPIS")
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Companies Screened", len(df))
-    c2.metric("After Filters", len(df_filtered))
-    c3.metric("Avg Final Score",
-              f"{df_filtered[score_col].mean():.1f}" if len(df_filtered) else "n/a")
-    c4.metric("High Debt Capacity", int((df_filtered["debt_capacity"] == "High").sum()))
+    with c1:
+        styled_kpi("SCREENED", f"{len(df)}")
+    with c2:
+        styled_kpi("FILTERED", f"{len(df_filtered)}")
+    with c3:
+        avg_score = f"{df_filtered[score_col].mean():.1f}" if len(df_filtered) else "n/a"
+        styled_kpi("AVG SCORE", avg_score)
+    with c4:
+        styled_kpi("HIGH DEBT CAP", f"{int((df_filtered['debt_capacity'] == 'High').sum())}")
 
     irr_col = "irr_base" if "irr_base" in df_filtered.columns else "irr_proxy"
     irr_median = df_filtered[irr_col].median() if irr_col in df_filtered.columns else None
-    c5.metric("Median IRR (Base)",
-              fmt_irr(irr_median) if irr_median is not None and not np.isnan(irr_median) else "n/a")
+    with c5:
+        irr_str = fmt_irr(irr_median) if irr_median is not None and not np.isnan(irr_median) else "n/a"
+        styled_kpi("MEDIAN IRR", irr_str)
 
     lbo_cfg = run_cfg.get("lbo", {})
     if irr_median is not None and not np.isnan(irr_median) and irr_median < 0.12:
         st.info(
-            f"**Market context:** Under current assumptions "
+            f"Market context. Under current assumptions "
             f"({int(lbo_cfg.get('holding_period', 5))}yr hold, "
             f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit, "
             f"{lbo_cfg.get('target_leverage', 4.0):.1f}x leverage), "
@@ -37,7 +44,7 @@ def render_kpis(df, df_filtered, score_col, run_cfg):
 
 def render_top_table(df_top, top_n, score_col, run_cfg):
     """Render the top targets table with formatted columns."""
-    st.subheader(f"Top {top_n} Candidates")
+    styled_section_label(f"TOP {top_n}")
 
     TABLE_COLS = [
         "rank", "ticker", "company", "sector",

@@ -1,5 +1,5 @@
 """
-tab_lbo_detail.py — LBO deal breakdown expander with scenario IRR and bridge charts.
+tab_lbo_detail.py | LBO deal breakdown expander with scenario IRR and bridge charts.
 """
 
 import streamlit as st
@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from app.helpers import fmt_irr, fmt_irr_delta, fmt_mult, fmt_millions
+from style_inject import apply_plotly_theme, styled_kpi, styled_divider, styled_section_label, TOKENS
 
 
 def render_lbo_expander(row: pd.Series, cfg: dict = None):
@@ -62,20 +63,25 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
 """)
         st.divider()
         b1, b2, b3 = st.columns(3)
-        b1.metric("Entry EV", fmt_millions(ev_val))
-        b1.metric("Max Debt", fmt_millions(max_debt_val))
-        b1.metric("Equity Cheque", fmt_millions(eq_req_val))
-        b2.metric("Exit EBITDA", fmt_millions(exit_ebitda))
-        b2.metric("Exit Multiple", f"{exit_mult:.1f}x")
-        b2.metric("Exit EV", fmt_millions(exit_ev))
-        b3.metric("Debt Repaid", fmt_millions(debt_repaid))
-        b3.metric("Debt Remaining", fmt_millions(debt_remaining))
-        b3.metric("Exit Equity", fmt_millions(exit_equity))
-        st.markdown("---")
+        with b1:
+            styled_kpi("ENTRY EV", fmt_millions(ev_val))
+            styled_kpi("MAX DEBT", fmt_millions(max_debt_val))
+            styled_kpi("EQUITY CHEQUE", fmt_millions(eq_req_val))
+        with b2:
+            styled_kpi("EXIT EBITDA", fmt_millions(exit_ebitda))
+            styled_kpi("EXIT MULTIPLE", f"{exit_mult:.1f}x")
+            styled_kpi("EXIT EV", fmt_millions(exit_ev))
+        with b3:
+            styled_kpi("DEBT REPAID", fmt_millions(debt_repaid))
+            styled_kpi("DEBT REMAINING", fmt_millions(debt_remaining))
+            styled_kpi("EXIT EQUITY", fmt_millions(exit_equity))
+        styled_divider()
 
         moic_col, irr_col = st.columns(2)
-        moic_col.metric("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "n/a")
-        irr_col.metric("Base IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
+        with moic_col:
+            styled_kpi("MOIC", f"{moic:.2f}x" if not pd.isna(moic) else "n/a")
+        with irr_col:
+            styled_kpi("BASE IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
 
         _render_scenario_irr(row)
         _render_irr_bridge(row)
@@ -83,35 +89,49 @@ def render_lbo_expander(row: pd.Series, cfg: dict = None):
 
 def _render_scenario_irr(row: pd.Series):
     """Render the 3-scenario IRR view with bar chart."""
-    st.markdown("**IRR Scenarios**")
+    styled_section_label("IRR SCENARIOS")
     irr_base_val = row.get("irr_base", row.get("irr_proxy"))
     irr_up_val = row.get("irr_upside")
     irr_dn_val = row.get("irr_downside")
 
     s1, s2, s3 = st.columns(3)
-    s1.metric("Downside", fmt_irr(irr_dn_val), delta=fmt_irr_delta(irr_dn_val, irr_base_val))
-    s2.metric("Base Case", fmt_irr(irr_base_val))
-    s3.metric("Upside", fmt_irr(irr_up_val), delta=fmt_irr_delta(irr_up_val, irr_base_val))
+    with s1:
+        delta = fmt_irr_delta(irr_dn_val, irr_base_val)
+        styled_kpi("DOWNSIDE", fmt_irr(irr_dn_val), delta=delta or "", delta_color=TOKENS["accent_danger"])
+    with s2:
+        styled_kpi("BASE", fmt_irr(irr_base_val))
+    with s3:
+        delta = fmt_irr_delta(irr_up_val, irr_base_val)
+        styled_kpi("UPSIDE", fmt_irr(irr_up_val), delta=delta or "", delta_color=TOKENS["accent_success"])
 
     scenario_vals = {"Downside": irr_dn_val, "Base": irr_base_val, "Upside": irr_up_val}
     valid = {k: v for k, v in scenario_vals.items() if v is not None and not pd.isna(v)}
     if not valid:
         return
 
-    bar_colors = {"Downside": "#e74c3c", "Base": "#4C78A8", "Upside": "#2ecc71"}
+    bar_colors = {
+        "Downside": TOKENS["accent_danger"],
+        "Base": TOKENS["accent_primary"],
+        "Upside": TOKENS["accent_success"],
+    }
     fig = go.Figure()
     for label, irr_val in valid.items():
         fig.add_trace(go.Bar(x=[irr_val * 100], y=[label], orientation="h",
-                             marker_color=bar_colors.get(label, "#888"), name=label,
+                             marker_color=bar_colors.get(label, TOKENS["accent_secondary"]), name=label,
                              text=[f"{irr_val:.1%}"], textposition="outside", showlegend=False))
-    fig.add_vline(x=20, line_dash="dash", line_color="rgba(200,200,200,0.6)",
+    fig.add_vline(x=20, line_dash="dash", line_color=TOKENS["text_muted"],
                   annotation_text="20% hurdle", annotation_position="top right",
                   annotation_font_size=10)
     x_min = min(min(v * 100 for v in valid.values()) - 5, -5)
     x_max = max(max(v * 100 for v in valid.values()) + 10, 30)
-    fig.update_layout(height=200, margin=dict(t=10, b=10, l=80, r=60),
-                      xaxis=dict(title="IRR (%)", range=[x_min, x_max]),
-                      yaxis=dict(title=""), bargap=0.3)
+    fig.update_layout(
+        height=240,
+        xaxis=dict(title="IRR (%)", range=[x_min, x_max]),
+        yaxis=dict(title=""),
+        bargap=0.3,
+        title="IRR by Scenario",
+    )
+    apply_plotly_theme(fig)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -126,19 +146,22 @@ def _render_irr_bridge(row: pd.Series):
     if not any(abs(v) > 0.001 for v in [growth_drv, delev_drv, mult_drv]):
         return
 
-    st.markdown("**IRR Decomposition (PE Return Attribution)**")
-    labels = ["EBITDA Growth", "Debt paydown", "Multiple delta"]
+    styled_section_label("IRR DECOMPOSITION")
+    labels = ["EBITDA Growth", "Debt Paydown", "Multiple Delta"]
     vals = [growth_drv * 100, delev_drv * 100, mult_drv * 100]
-    colors = ["#2ecc71" if v >= 0 else "#e74c3c" for v in vals]
+    colors = [TOKENS["accent_success"] if v >= 0 else TOKENS["accent_danger"] for v in vals]
 
     fig = go.Figure()
     fig.add_trace(go.Bar(x=labels, y=vals, marker_color=colors,
                          text=[f"{v:+.1f}%" for v in vals], textposition="outside", showlegend=False))
-    fig.add_hline(y=0, line_dash="solid", line_color="rgba(200,200,200,0.5)", line_width=1)
+    fig.add_hline(y=0, line_dash="solid", line_color=TOKENS["text_muted"], line_width=1)
     y_abs_max = max(abs(v) for v in vals) * 1.4 or 5
     irr_base_val = row.get("irr_base", row.get("irr_proxy"))
-    fig.update_layout(height=220, margin=dict(t=30, b=10, l=10, r=10),
-                      yaxis=dict(title="IRR contribution (%)", range=[-y_abs_max, y_abs_max]),
-                      xaxis=dict(title=""),
-                      title=dict(text=f"Base IRR: {fmt_irr(irr_base_val)} by driver", font=dict(size=12)))
+    fig.update_layout(
+        height=260,
+        yaxis=dict(title="IRR contribution (%)", range=[-y_abs_max, y_abs_max]),
+        xaxis=dict(title=""),
+        title=f"Base IRR: {fmt_irr(irr_base_val)} by driver",
+    )
+    apply_plotly_theme(fig)
     st.plotly_chart(fig, use_container_width=True)

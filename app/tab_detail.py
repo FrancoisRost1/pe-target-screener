@@ -1,7 +1,7 @@
 """
-tab_detail.py — Company drill-down detail view for the Streamlit dashboard.
+tab_detail.py | Company drill-down detail view for the Streamlit dashboard.
 
-Renders metric cards, score decomposition, investment memo, radar chart,
+Renders KPI cards, score decomposition, investment memo, radar chart,
 and penalty breakdown. LBO expander is in tab_lbo_detail.py.
 """
 
@@ -14,6 +14,7 @@ from app.helpers import (
     fmt_millions, fmt_fcf_yield_equity, debt_capacity_color,
 )
 from app.tab_lbo_detail import render_lbo_expander
+from style_inject import apply_plotly_theme, styled_kpi, styled_section_label, TOKENS
 
 
 def render_company_detail(row: pd.Series, cfg: dict = None):
@@ -30,21 +31,30 @@ def render_company_detail(row: pd.Series, cfg: dict = None):
 
 
 def _render_metrics(row: pd.Series, cfg: dict = None):
-    """Render metric cards and LBO breakdown expander."""
-    st.markdown(f"### {row.get('company', row.get('ticker'))}")
-    st.caption(f"**Sector:** {row.get('sector', 'n/a')}  |  **Rank:** #{int(row.get('rank', 0))}")
+    """Render KPI cards and LBO breakdown expander."""
+    name = row.get('company', row.get('ticker'))
+    st.markdown(f"### {name}")
+    st.caption(f"Sector: {row.get('sector', 'n/a')} | Rank: #{int(row.get('rank', 0))}")
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Final Score", fmt_score(row.get("pe_score_final", row.get("pe_score_adjusted", row.get("pe_score")))))
-    m2.metric("EBITDA Margin", fmt_pct(row.get("ebitda_margin")))
-    m3.metric("FCF Conversion", fmt_pct(row.get("fcf_conversion")))
-    m4.metric("EV/EBITDA", fmt_mult(row.get("ev_to_ebitda")))
+    with m1:
+        styled_kpi("FINAL SCORE", fmt_score(row.get("pe_score_final", row.get("pe_score_adjusted", row.get("pe_score")))))
+    with m2:
+        styled_kpi("EBITDA MARGIN", fmt_pct(row.get("ebitda_margin")))
+    with m3:
+        styled_kpi("FCF CONV", fmt_pct(row.get("fcf_conversion")))
+    with m4:
+        styled_kpi("EV/EBITDA", fmt_mult(row.get("ev_to_ebitda")))
 
     m5, m6, m7, m8 = st.columns(4)
-    m5.metric("Base IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
-    m6.metric("Max Debt", fmt_millions(row.get("max_debt")))
-    m7.metric("Equity Required", fmt_millions(row.get("equity_required")))
-    m8.metric("FCF Yield / Equity", fmt_fcf_yield_equity(row.get("fcf_yield_equity")))
+    with m5:
+        styled_kpi("BASE IRR", fmt_irr(row.get("irr_base", row.get("irr_proxy"))))
+    with m6:
+        styled_kpi("MAX DEBT", fmt_millions(row.get("max_debt")))
+    with m7:
+        styled_kpi("EQUITY REQ", fmt_millions(row.get("equity_required")))
+    with m8:
+        styled_kpi("FCF YIELD / EQ", fmt_fcf_yield_equity(row.get("fcf_yield_equity")))
 
     raw = row.get("pe_score_raw", row.get("pe_score"))
     adj = row.get("pe_score_adjusted")
@@ -63,11 +73,11 @@ def _render_memo_and_flags(row: pd.Series):
     """Render investment memo and red flags."""
     memo = row.get("investment_memo", "")
     if memo:
-        st.markdown("**Investment Memo**")
+        styled_section_label("INVESTMENT MEMO")
         st.markdown(memo.replace("\n", "  \n"))
     flags = row.get("red_flags", "")
     if flags and not (isinstance(flags, float) and np.isnan(flags)):
-        st.warning(f"**Red Flags:** {flags}")
+        st.warning(f"Red Flags: {flags}")
 
 
 def _render_radar(row: pd.Series):
@@ -79,18 +89,27 @@ def _render_radar(row: pd.Series):
         return
     categories = list(valid.keys())
     values = list(valid.values())
+    accent = TOKENS["accent_primary"]
+    # Build semi-transparent fill from accent hex
+    hex_val = accent.lstrip("#")
+    r, g, b = int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
+    fill_rgba = f"rgba({r},{g},{b},0.25)"
     fig = go.Figure(go.Scatterpolar(
         r=values + [values[0]], theta=categories + [categories[0]],
-        fill="toself", fillcolor="rgba(76, 120, 168, 0.3)", line_color="#4C78A8"))
-    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-                      showlegend=False, height=280, margin=dict(t=30, b=20), title="Sub-Score Radar")
+        fill="toself", fillcolor=fill_rgba, line_color=accent))
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        showlegend=False, height=280,
+        title="Sub-Score Radar",
+    )
+    apply_plotly_theme(fig)
     st.plotly_chart(fig, use_container_width=True)
 
 
 def _render_penalties(row: pd.Series):
     """Render debt capacity badge and penalty breakdown."""
     dc = row.get("debt_capacity", "n/a")
-    st.metric("Debt Capacity", f"{debt_capacity_color(dc)} {dc}")
+    styled_kpi("DEBT CAPACITY", f"{debt_capacity_color(dc)} {dc}")
     rf_pen = row.get("red_flag_penalty", 0) or 0
     val_pen = row.get("valuation_penalty", 0) or 0
     dk_pen = row.get("deal_killer_penalty", 0) or 0
