@@ -1,5 +1,5 @@
 """
-changelog_display.py — Rich console display for the daily changelog.
+changelog_display.py, Rich console display for the daily changelog.
 """
 
 import pandas as pd

@@ -1,5 +1,5 @@
 """
-scoring_adjustments.py — Score penalty adjustments, IRR blending, and hurdle logic
+scoring_adjustments.py, Score penalty adjustments, IRR blending, and hurdle logic
 
 Produces pe_score_adjusted and pe_score_final from the raw pe_score
 by applying additive penalties, deal-killer penalties, IRR blending,
@@ -18,10 +18,10 @@ def apply_score_adjustments(df: pd.DataFrame, cfg: dict = None) -> pd.DataFrame:
     """
     Apply all score penalties to produce pe_score_adjusted, then pe_score_final.
 
-    Step 1 — Additive penalties (red flags, expensive valuation)
-    Step 2 — Deal killer (multiplicative for broken LBO math)
-    Step 3 — IRR blending (quality score + IRR signal)
-    Step 4 — IRR hurdle penalty
+    Step 1, Additive penalties (red flags, expensive valuation)
+    Step 2, Deal killer (multiplicative for broken LBO math)
+    Step 3, IRR blending (quality score + IRR signal)
+    Step 4, IRR hurdle penalty
     """
     if cfg is None:
         cfg = {}

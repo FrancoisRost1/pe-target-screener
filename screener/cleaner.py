@@ -1,5 +1,5 @@
 """
-cleaner.py — Data cleaning, normalization, and winsorization
+cleaner.py, Data cleaning, normalization, and winsorization
 
 Handles missing values, type casting, outlier detection, and
 data quality flags before ratio computation begins.

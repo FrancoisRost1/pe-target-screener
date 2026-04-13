@@ -1,5 +1,5 @@
 """
-sidebar.py — Streamlit sidebar controls for the PE Target Screener.
+sidebar.py, Streamlit sidebar controls for the PE Target Screener.
 """
 
 import streamlit as st

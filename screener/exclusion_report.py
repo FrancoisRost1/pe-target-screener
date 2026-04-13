@@ -1,5 +1,5 @@
 """
-exclusion_report.py — Document why companies were excluded from scoring
+exclusion_report.py, Document why companies were excluded from scoring
 
 Captures every company that was filtered out and the specific reason,
 so analysts can review whether exclusions are justified.
@@ -33,7 +33,7 @@ def generate_exclusion_report(
     excluded = df_raw[~df_raw["ticker"].isin(scored_tickers)].copy()
 
     if excluded.empty:
-        logger.info("No companies excluded — all passed filters")
+        logger.info("No companies excluded, all passed filters")
         return pd.DataFrame(columns=["ticker", "company", "sector", "reason", "details"])
 
     rows = []
@@ -49,13 +49,13 @@ def generate_exclusion_report(
         if pd.isna(row.get("revenue")) and pd.isna(row.get("ebitda")):
             reasons.append(("No financial data", "yfinance returned no income statement"))
 
-        # Check: size — revenue too low
+        # Check: size, revenue too low
         min_rev = e.get("min_revenue", 0)
         rev = row.get("revenue", 0)
         if pd.notna(rev) and rev < min_rev and min_rev > 0:
             reasons.append(("Below min revenue", f"Revenue: ${rev/1e6:,.0f}M (min: ${min_rev/1e6:,.0f}M)"))
 
-        # Check: size — EBITDA too low
+        # Check: size, EBITDA too low
         min_ebitda = e.get("min_ebitda", 0)
         ebitda = row.get("ebitda", 0)
         if pd.notna(ebitda) and ebitda < min_ebitda and min_ebitda > 0:
@@ -81,7 +81,7 @@ def generate_exclusion_report(
 
         # If no specific reason found, mark as unknown
         if not reasons:
-            reasons.append(("Unknown", "Excluded but reason not matched — check pipeline logic"))
+            reasons.append(("Unknown", "Excluded but reason not matched, check pipeline logic"))
 
         for reason, details in reasons:
             rows.append({

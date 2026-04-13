@@ -1,5 +1,5 @@
 """
-ranking.py — Final ranking and top-N selection
+ranking.py, Final ranking and top-N selection
 
 Sorts companies by pe_score, assigns rank, and extracts the shortlist.
 """

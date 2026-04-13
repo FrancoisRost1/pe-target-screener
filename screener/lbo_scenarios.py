@@ -1,5 +1,5 @@
 """
-lbo_scenarios.py — IRR engine, scenarios, and bridge decomposition.
+lbo_scenarios.py, IRR engine, scenarios, and bridge decomposition.
 
 Owns the per-company IRR engine (`_build_cashflows_and_compute_irr`), the
 per-scenario wrapper (`_compute_single_irr`), and the public scenario / bridge
@@ -106,7 +106,7 @@ def compute_lbo_irr_proxy(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """Compute base-case IRR proxy. Exit multiple capped at config value."""
     required_cols = {"ebitda", "equity_required", "max_debt"}
     if not required_cols.issubset(df.columns):
-        logger.warning("Missing columns for IRR proxy — skipping")
+        logger.warning("Missing columns for IRR proxy, skipping")
         df["irr_proxy"] = np.nan
         return df
 
@@ -137,7 +137,7 @@ def compute_scenario_irr(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
 
     spread = (df["irr_upside"] - df["irr_downside"]).median()
     logger.info(
-        f"Scenario IRR — spread {spread:.1%} (up {df['irr_upside'].median():.1%}"
+        f"Scenario IRR, spread {spread:.1%} (up {df['irr_upside'].median():.1%}"
         f" / base {df['irr_base'].median():.1%} / down {df['irr_downside'].median():.1%})"
     )
     return df

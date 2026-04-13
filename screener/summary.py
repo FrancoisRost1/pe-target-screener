@@ -1,8 +1,8 @@
 """
-summary.py — Auto-generated investment memo snippets
+summary.py, Auto-generated investment memo snippets
 
 Generates a structured Bull / Bear / Risk memo for each top candidate.
-No AI needed — pure rule-based logic that reads like an analyst wrote it.
+No AI needed, pure rule-based logic that reads like an analyst wrote it.
 
 Format mirrors a real IC one-pager: BULL / BEAR / KEY RISK.
 """
@@ -63,8 +63,8 @@ def generate_memo(row: pd.Series) -> str:
         elif rev_g < -0.02: bear.append(f"declining revenue ({rev_g:.1%} YoY)")
 
     if irr is not None and not pd.isna(irr):
-        if irr > 0.20: bull.append(f"IRR proxy ~{irr:.0%} — deal math works")
-        elif irr < 0.10: bear.append(f"IRR proxy ~{irr:.0%} — returns look stretched")
+        if irr > 0.20: bull.append(f"IRR proxy ~{irr:.0%}, deal math works")
+        elif irr < 0.10: bear.append(f"IRR proxy ~{irr:.0%}, returns look stretched")
 
     if not bull: bull.append("defensive business model with stable cash generation")
     if not bear:
@@ -87,7 +87,7 @@ def generate_memo(row: pd.Series) -> str:
     score_str = f"{score:.0f}" if isinstance(score, float) and not pd.isna(score) else "N/A"
     irr_str = f"~{irr:.0%}" if irr is not None and not pd.isna(irr) else "N/A"
 
-    header = f"#{rank} — {company} (Score: {score_str}/100 | Debt Capacity: {dc} | IRR: {irr_str})"
+    header = f"#{rank}, {company} (Score: {score_str}/100 | Debt Capacity: {dc} | IRR: {irr_str})"
     bull_text = "; ".join(bull[:3]) + "."
     bear_text = "; ".join(bear[:2]) + "."
 

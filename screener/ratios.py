@@ -1,5 +1,5 @@
 """
-ratios.py — Financial ratio computation
+ratios.py, Financial ratio computation
 
 Computes core PE/LBO screening metrics from raw financial data.
 Each function handles division by zero and missing data defensively.
@@ -59,7 +59,7 @@ def compute_net_debt(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def compute_net_debt_to_ebitda(df: pd.DataFrame) -> pd.DataFrame:
-    """Net Debt / EBITDA — current leverage multiple. Lower = better for LBO."""
+    """Net Debt / EBITDA, current leverage multiple. Lower = better for LBO."""
     df["net_debt_to_ebitda"] = _safe_divide(df.get("net_debt"), df.get("ebitda"))
     return df
 

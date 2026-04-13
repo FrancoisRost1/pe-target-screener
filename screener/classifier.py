@@ -1,5 +1,5 @@
 """
-classifier.py — Debt capacity classification, red flag detection, and score penalties
+classifier.py, Debt capacity classification, red flag detection, and score penalties
 
 All thresholds and penalty magnitudes are loaded from config.yaml —
 nothing is hardcoded. The same thresholds drive both flag detection

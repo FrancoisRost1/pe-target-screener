@@ -1,5 +1,5 @@
 """
-ratios_utils.py — Shared low-level helpers for the ratio computation modules.
+ratios_utils.py, Shared low-level helpers for the ratio computation modules.
 
 Lives separately from ratios.py / ratios_secondary.py so both can import
 `_safe_divide` without creating an import cycle.

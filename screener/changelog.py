@@ -1,5 +1,5 @@
 """
-changelog.py — Daily score comparison and change tracking
+changelog.py, Daily score comparison and change tracking
 
 Compares today's scored output to the most recent previous run.
 Display logic is in changelog_display.py.
@@ -38,7 +38,7 @@ def generate_changelog(df_today: pd.DataFrame, cfg: dict) -> Optional[pd.DataFra
 
     prior = _find_prior_snapshot(history_dir, today_str)
     if prior is None:
-        logger.info("No prior snapshot found — skipping changelog (first run)")
+        logger.info("No prior snapshot found, skipping changelog (first run)")
         return None
 
     df_prior = pd.read_csv(prior)

@@ -1,5 +1,5 @@
 """
-eligibility.py — Pre-screening eligibility filters
+eligibility.py, Pre-screening eligibility filters
 
 Applies size filters and hard PE quality gates before scoring.
 All thresholds are loaded from config.yaml eligibility section.
@@ -19,7 +19,7 @@ def apply_eligibility_filters(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
       2. Hard PE filters: thresholds from config.yaml eligibility section.
 
     PE context: Funds have minimum size requirements and won't consider businesses
-    with structural deficiencies — negative EBITDA, insufficient interest coverage,
+    with structural deficiencies, negative EBITDA, insufficient interest coverage,
     or margins too thin to absorb acquisition debt.
     """
     e = cfg.get("eligibility", {})

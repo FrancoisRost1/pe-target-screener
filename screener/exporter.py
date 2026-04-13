@@ -1,5 +1,5 @@
 """
-exporter.py — Output generation (CSV and Excel)
+exporter.py, Output generation (CSV and Excel)
 
 Exports the full scored dataset and top-N shortlist.
 """

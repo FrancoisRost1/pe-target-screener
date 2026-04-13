@@ -1,1 +1,1 @@
-"""PE Target Screener — modular screening engine."""
+"""PE Target Screener, modular screening engine."""

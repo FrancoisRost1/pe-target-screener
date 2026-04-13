@@ -1,5 +1,5 @@
 """
-scoring.py — Weighted percentile scoring engine
+scoring.py, Weighted percentile scoring engine
 
 Converts raw financial ratios into a normalized 0–100 PE attractiveness score.
 Blend weights loaded from config.yaml scoring section.

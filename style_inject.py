@@ -165,7 +165,11 @@ def inject_styles():
         letter-spacing: 0.08em !important;
     }}
 
-    p, span, label, .stMarkdown {{
+    /* Typography for content only — NOT universal `span`. Streamlit's
+       Material Icons live in `<span class="material-...">` nodes; if we
+       override their font-family, the ligature names ("keyboard_double_arrow_right")
+       leak as raw text because the glyph-substituting font is suppressed. */
+    .stApp p, .stApp label, .stMarkdown, .stMarkdown span, .stMarkdown p {{
         font-family: {TOKENS["font_body"]} !important;
         color: {TOKENS["text_secondary"]};
         font-size: {TOKENS["text_base"]} !important;

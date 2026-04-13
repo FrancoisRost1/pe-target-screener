@@ -1,8 +1,8 @@
 """
-ratios_secondary.py — Secondary financial ratio computations
+ratios_secondary.py, Secondary financial ratio computations
 
 Contains ROIC, EV/EBITDA, growth, capex intensity, and FCF yield ratios.
-All use `_safe_divide` from ratios_utils.py — importing from there (rather
+All use `_safe_divide` from ratios_utils.py, importing from there (rather
 than from ratios.py) keeps the dependency one-way and avoids any import
 cycle with ratios.py.
 """
@@ -30,7 +30,7 @@ def compute_roic(df: pd.DataFrame, tax_rate: float = 0.25, min_ic: float = 1) ->
 
 def compute_ev_to_ebitda(df: pd.DataFrame) -> pd.DataFrame:
     """
-    EV / EBITDA — Primary LBO entry multiple.
+    EV / EBITDA, Primary LBO entry multiple.
     Lower = more attractive for buyout. Most PE deals happen 8–14x.
     """
     df["ev_to_ebitda"] = _safe_divide(df.get("enterprise_value"), df.get("ebitda"))
@@ -61,7 +61,7 @@ def compute_ebitda_growth(df: pd.DataFrame) -> pd.DataFrame:
 
 def compute_capex_to_revenue(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Capex / Revenue — capital intensity proxy.
+    Capex / Revenue, capital intensity proxy.
     PE prefers asset-light models where FCF flows to debt service.
     """
     df["capex_to_revenue"] = _safe_divide(df.get("capex"), df.get("revenue"))

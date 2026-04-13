@@ -1,5 +1,5 @@
 """
-lbo.py — LBO return estimation: debt capacity, orchestration, FCF yield.
+lbo.py, LBO return estimation: debt capacity, orchestration, FCF yield.
 
 The IRR engine and scenario functions live in lbo_scenarios.py to keep this
 file under the 150-line limit and to enforce a one-way dependency

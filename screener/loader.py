@@ -1,5 +1,5 @@
 """
-loader.py — Data fetching and validation
+loader.py, Data fetching and validation
 
 Fetches financial data for a universe of public companies via yfinance.
 Saves raw output to data/raw/companies_raw.csv.
@@ -122,7 +122,7 @@ def fetch_company_data(ticker_info: dict):
         }
 
     except Exception as e:
-        logger.error(f"{ticker}: Failed — {e}")
+        logger.error(f"{ticker}: Failed, {e}")
         return None
 
 

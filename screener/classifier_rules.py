@@ -1,5 +1,5 @@
 """
-classifier_rules.py — Deal killer penalties and debt capacity classification
+classifier_rules.py, Deal killer penalties and debt capacity classification
 
 Contains the multiplicative penalty logic for broken LBO math and the
 rule-based debt capacity classification (High / Medium / Low).
