@@ -32,13 +32,15 @@ def render_kpis(df, df_filtered, score_col, run_cfg):
     lbo_cfg = run_cfg.get("lbo", {})
     if irr_median is not None and not np.isnan(irr_median) and irr_median < 0.12:
         st.info(
-            f"Market context. Under current assumptions "
-            f"({int(lbo_cfg.get('holding_period', 5))}yr hold, "
-            f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit, "
-            f"{lbo_cfg.get('target_leverage', 4.0):.1f}x leverage), "
-            f"most public comps do not meet typical PE return thresholds (20%+ IRR). "
-            f"Median base IRR: {fmt_irr(irr_median)}. "
-            f"Adjust LBO assumptions in the sidebar to stress-test scenarios."
+            f"Screening insight. Most public large-caps are priced for "
+            f"public-market returns, not sponsor returns: at "
+            f"{int(lbo_cfg.get('holding_period', 5))}yr hold, "
+            f"{lbo_cfg.get('exit_multiple', 10.0):.0f}x exit and "
+            f"{lbo_cfg.get('target_leverage', 4.0):.1f}x leverage the median base "
+            f"IRR is {fmt_irr(irr_median)}, well below the 20%+ PE hurdle. That is "
+            f"the expected result and precisely why the screen matters, the ranked "
+            f"candidates below are the few names that clear the bar. Adjust "
+            f"assumptions in the sidebar to stress-test."
         )
 
 
